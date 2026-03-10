@@ -1,0 +1,16 @@
+[project]
+name = "stock"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "akshare>=1.18.30",
+    "akquant>=0.1.51",
+    "numpy>=2.4.2",
+    "pandas>=3.0.1",
+    "jupyterlab>=4.5.5",
+    "matplotlib>=3.10.8",
+    "adata>=2.9.5",
+    "duckdb>=1.4.4",
+]

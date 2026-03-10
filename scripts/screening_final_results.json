@@ -1,0 +1,54 @@
+[
+  {
+    "symbol": "603508.SH",
+    "name": "思维列控",
+    "industry": "IT设备",
+    "price": 64.08,
+    "pe": 16.1987,
+    "pb": 2.5996,
+    "financial": {
+      "symbol": "603508.SH",
+      "roe": 8.51,
+      "revenue_growth": 5.25,
+      "profit_growth": 20.98,
+      "debt_ratio": 7.21,
+      "gross_margin": 67.22,
+      "net_margin": 42.91,
+      "current_ratio": 7.64,
+      "report_period": "2025-09-30"
+    },
+    "cashflow": {
+      "symbol": "603508.SH",
+      "fcf_latest": 497818565.32,
+      "fcf_avg_3y": 293651151.5466667,
+      "fcf_positive_3y": 3
+    },
+    "quality_score": 70
+  },
+  {
+    "symbol": "601919.SH",
+    "name": "中远海控",
+    "industry": "水运",
+    "price": 30.34,
+    "pe": 6.3551,
+    "pb": 1.0855,
+    "financial": {
+      "symbol": "601919.SH",
+      "roe": 11.37,
+      "revenue_growth": -4.09,
+      "profit_growth": -29.0,
+      "debt_ratio": 43.46,
+      "gross_margin": 21.98,
+      "net_margin": 18.37,
+      "current_ratio": 1.5,
+      "report_period": "2025-09-30"
+    },
+    "cashflow": {
+      "symbol": "601919.SH",
+      "fcf_latest": 39981831734.27,
+      "fcf_avg_3y": 26940340027.303333,
+      "fcf_positive_3y": 3
+    },
+    "quality_score": 70
+  }
+]
