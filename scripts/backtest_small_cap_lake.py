@@ -100,7 +100,7 @@ def parse_args() -> argparse.Namespace:
         "--mode",
         type=str,
         default="full_combo",
-        choices=["baseline", "buffer_only", "buffer_risk", "full_combo", "all"],
+        choices=["baseline", "buffer_only", "buffer_risk", "full_combo", "sharpe_booster", "all"],
     )
     p.add_argument("--hold-rank-cutoff", type=int, default=30)
     p.add_argument("--hold-value-quantile", type=float, default=0.6)
@@ -373,6 +373,8 @@ def resolve_mode_configs(mode: str) -> dict[str, dict[str, object]]:
             "require_momentum": False,
             "entry_buffer": 0.0,
             "exit_buffer": 0.0,
+            "min_raw_close": 0.0,
+            "low_vol_exclude_pct": 0.0,
         },
         "buffer_only": {
             "use_buffer": True,
@@ -380,6 +382,8 @@ def resolve_mode_configs(mode: str) -> dict[str, dict[str, object]]:
             "require_momentum": False,
             "entry_buffer": 0.0,
             "exit_buffer": 0.0,
+            "min_raw_close": 0.0,
+            "low_vol_exclude_pct": 0.0,
         },
         "buffer_risk": {
             "use_buffer": True,
@@ -387,6 +391,8 @@ def resolve_mode_configs(mode: str) -> dict[str, dict[str, object]]:
             "require_momentum": False,
             "entry_buffer": 0.0,
             "exit_buffer": 0.0,
+            "min_raw_close": 0.0,
+            "low_vol_exclude_pct": 0.0,
         },
         "full_combo": {
             "use_buffer": True,
@@ -394,6 +400,17 @@ def resolve_mode_configs(mode: str) -> dict[str, dict[str, object]]:
             "require_momentum": True,
             "entry_buffer": 0.015,
             "exit_buffer": 0.015,
+            "min_raw_close": 0.0,
+            "low_vol_exclude_pct": 0.0,
+        },
+        "sharpe_booster": {
+            "use_buffer": True,
+            "use_risk_filters": True,
+            "require_momentum": True,
+            "entry_buffer": 0.015,
+            "exit_buffer": 0.015,
+            "min_raw_close": 2.5,
+            "low_vol_exclude_pct": 0.2,
         },
     }
     if mode == "all":
@@ -701,6 +718,7 @@ def rank_signal_snapshot(
     require_momentum: bool = False,
     require_positive_roe: bool = False,
     exclude_st: bool = False,
+    min_raw_close: float = 0.0,
 ) -> pd.DataFrame:
     if snapshot_df.empty:
         return snapshot_df.iloc[0:0].copy()
@@ -744,6 +762,12 @@ def rank_signal_snapshot(
     else:
         work["momentum_ok"] = True
 
+    if "raw_close" in work.columns:
+        work["raw_close"] = pd.to_numeric(work["raw_close"], errors="coerce")
+        work["price_ok"] = work["raw_close"] >= float(min_raw_close)
+    else:
+        work["price_ok"] = True
+
     if "roe" in work.columns:
         work["roe"] = pd.to_numeric(work["roe"], errors="coerce")
         work["roe_ok"] = work["roe"] > 0
@@ -772,6 +796,9 @@ def rank_signal_snapshot(
     if exclude_st:
         buy_ok &= work["risk_ok"]
         hold_ok &= work["risk_ok"]
+    if float(min_raw_close) > 0:
+        buy_ok &= work["price_ok"]
+        hold_ok &= work["price_ok"]
 
     work["buy_candidate"] = buy_ok
     work["hold_candidate"] = hold_ok
@@ -787,6 +814,8 @@ def select_small_cap_candidates(
     require_momentum: bool = False,
     require_positive_roe: bool = False,
     exclude_st: bool = False,
+    min_raw_close: float = 0.0,
+    low_vol_exclude_pct: float = 0.0,
 ) -> pd.DataFrame:
     ranked = rank_signal_snapshot(
         snapshot_df=snapshot_df,
@@ -803,6 +832,25 @@ def select_small_cap_candidates(
     work = ranked[ranked["buy_candidate"]].copy()
     if work.empty:
         return work
+
+    if "raw_close" in work.columns and float(min_raw_close) > 0:
+        work["raw_close"] = pd.to_numeric(work["raw_close"], errors="coerce")
+        work = work[work["raw_close"] >= float(min_raw_close)]
+        if work.empty:
+            return work
+
+    if "vol20" in work.columns and float(low_vol_exclude_pct) > 0:
+        work["vol20"] = pd.to_numeric(work["vol20"], errors="coerce")
+        keep_cutoff = max(0.0, 1.0 - float(low_vol_exclude_pct))
+        valid = work["vol20"].notna()
+        if valid.any():
+            work.loc[valid, "vol20_rank"] = work.loc[valid, "vol20"].rank(
+                pct=True, ascending=True, method="average"
+            )
+            work = work[(~valid) | (work["vol20_rank"] <= keep_cutoff)]
+            if work.empty:
+                return work
+
     work = work.sort_values(["total_mv_10k", "symbol"], ascending=[True, True])
     return work.head(max(1, int(stock_num))).reset_index(drop=True)
 
@@ -823,19 +871,22 @@ def load_weekly_selection_frames(
             """
             WITH base AS (
               SELECT
-                date,
-                symbol,
-                name,
-                industry,
-                pe_ttm,
-                pb,
-                total_mv_10k,
-                list_date,
-                close
-              FROM v_daily_hfq_w_ind_dim
-              WHERE date BETWEEN ? AND ?
+                d.date,
+                d.symbol,
+                d.name,
+                d.industry,
+                d.pe_ttm,
+                d.pb,
+                d.total_mv_10k,
+                d.list_date,
+                d.close,
+                r.close AS raw_close
+              FROM v_daily_hfq_w_ind_dim d
+              LEFT JOIN v_bar_daily_raw r
+                ON d.symbol = r.symbol AND d.date = r.date
+              WHERE d.date BETWEEN ? AND ?
             ),
-            ma AS (
+            with_ret AS (
               SELECT
                 date,
                 symbol,
@@ -846,12 +897,56 @@ def load_weekly_selection_frames(
                 total_mv_10k,
                 list_date,
                 close,
+                raw_close,
+                LAG(close) OVER (
+                  PARTITION BY symbol
+                  ORDER BY date
+                ) AS prev_close,
                 AVG(close) OVER (
                   PARTITION BY symbol
                   ORDER BY date
                   ROWS BETWEEN 19 PRECEDING AND CURRENT ROW
                 ) AS ma20_stock
               FROM base
+            ),
+            ret AS (
+              SELECT
+                date,
+                symbol,
+                name,
+                industry,
+                pe_ttm,
+                pb,
+                total_mv_10k,
+                list_date,
+                close,
+                raw_close,
+                ma20_stock,
+                CASE
+                  WHEN prev_close IS NULL OR prev_close = 0 THEN NULL
+                  ELSE close / prev_close - 1
+                END AS ret_1d
+              FROM with_ret
+            ),
+            vol AS (
+              SELECT
+                date,
+                symbol,
+                name,
+                industry,
+                pe_ttm,
+                pb,
+                total_mv_10k,
+                list_date,
+                close,
+                raw_close,
+                ma20_stock,
+                STDDEV_SAMP(ret_1d) OVER (
+                  PARTITION BY symbol
+                  ORDER BY date
+                  ROWS BETWEEN 19 PRECEDING AND CURRENT ROW
+                ) AS vol20
+              FROM ret
             )
             SELECT
               m.date AS signal_date,
@@ -863,8 +958,10 @@ def load_weekly_selection_frames(
               m.total_mv_10k,
               m.list_date,
               m.close,
-              m.ma20_stock
-            FROM ma m
+              m.raw_close,
+              m.ma20_stock,
+              m.vol20
+            FROM vol m
             INNER JOIN tmp_signal_dates d
               ON m.date = d.signal_date
             WHERE m.pe_ttm IS NOT NULL
@@ -1109,7 +1206,25 @@ def build_ranked_weekly_snapshots(
             require_momentum=bool(mode_cfg["require_momentum"]),
             require_positive_roe=bool(mode_cfg["use_risk_filters"]),
             exclude_st=bool(mode_cfg["use_risk_filters"]),
+            min_raw_close=float(mode_cfg.get("min_raw_close", 0.0)),
         )
+        low_vol_exclude_pct = float(mode_cfg.get("low_vol_exclude_pct", 0.0))
+        if (
+            not ranked.empty
+            and low_vol_exclude_pct > 0
+            and "vol20" in ranked.columns
+            and ranked["buy_candidate"].fillna(False).astype(bool).any()
+        ):
+            buy_mask = ranked["buy_candidate"].fillna(False).astype(bool)
+            vol_mask = buy_mask & ranked["vol20"].notna()
+            if vol_mask.any():
+                ranked.loc[vol_mask, "vol20_rank"] = ranked.loc[vol_mask, "vol20"].rank(
+                    pct=True, ascending=True, method="average"
+                )
+                ranked.loc[vol_mask, "buy_candidate"] = (
+                    ranked.loc[vol_mask, "vol20_rank"]
+                    <= max(0.0, 1.0 - low_vol_exclude_pct)
+                )
         if not ranked.empty:
             ranked_parts.append(ranked)
     if not ranked_parts:

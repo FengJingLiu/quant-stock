@@ -192,6 +192,61 @@ class TestBacktestSmallCapLake(unittest.TestCase):
 
         self.assertEqual(out["symbol"].tolist(), ["A"])
 
+    def test_select_small_cap_candidates_filters_low_raw_price(self) -> None:
+        signal_date = cast(pd.Timestamp, pd.Timestamp("2020-01-10"))
+        snapshot = pd.DataFrame(
+            {
+                "symbol": ["A", "B", "C"],
+                "industry": ["Tech", "Tech", "Tech"],
+                "pe_ttm": [5.0, 6.0, 7.0],
+                "pb": [1.0, 1.1, 1.2],
+                "total_mv_10k": [100.0, 110.0, 120.0],
+                "list_date": pd.to_datetime(
+                    ["2010-01-01", "2010-01-01", "2010-01-01"]
+                ),
+                "raw_close": [2.4, 2.5, 3.1],
+            }
+        )
+
+        out = select_small_cap_candidates(
+            snapshot,
+            signal_date=signal_date,
+            stock_num=3,
+            value_quantile=1.0,
+            min_list_days=250,
+            min_raw_close=2.5,
+        )
+
+        self.assertEqual(out["symbol"].tolist(), ["B", "C"])
+
+    def test_select_small_cap_candidates_excludes_highest_vol20_bucket(self) -> None:
+        signal_date = cast(pd.Timestamp, pd.Timestamp("2020-01-10"))
+        snapshot = pd.DataFrame(
+            {
+                "symbol": ["A", "B", "C", "D", "E"],
+                "industry": ["Tech", "Tech", "Tech", "Tech", "Tech"],
+                "pe_ttm": [5.0, 6.0, 7.0, 8.0, 9.0],
+                "pb": [1.0, 1.1, 1.2, 1.3, 1.4],
+                "total_mv_10k": [100.0, 110.0, 120.0, 130.0, 140.0],
+                "list_date": pd.to_datetime(
+                    ["2010-01-01", "2010-01-01", "2010-01-01", "2010-01-01", "2010-01-01"]
+                ),
+                "vol20": [0.02, 0.03, 0.04, 0.05, 0.90],
+            }
+        )
+
+        out = select_small_cap_candidates(
+            snapshot,
+            signal_date=signal_date,
+            stock_num=5,
+            value_quantile=1.0,
+            min_list_days=250,
+            low_vol_exclude_pct=0.2,
+        )
+
+        self.assertEqual(out["symbol"].tolist(), ["A", "B", "C", "D"])
+        self.assertNotIn("E", out["symbol"].tolist())
+
     def test_build_timing_state_uses_hysteresis_band(self) -> None:
         frame = pd.DataFrame(
             {
@@ -349,7 +404,7 @@ class TestBacktestSmallCapLake(unittest.TestCase):
 
         self.assertEqual(
             list(out.keys()),
-            ["baseline", "buffer_only", "buffer_risk", "full_combo"],
+            ["baseline", "buffer_only", "buffer_risk", "full_combo", "sharpe_booster"],
         )
 
 
