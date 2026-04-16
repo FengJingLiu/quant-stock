@@ -233,29 +233,44 @@ def generate_report(
     # ── 实验对比总览 ─────────────────────────────────────────────────────
     lines.append("## 实验对比总览")
     lines.append("")
-    lines.append("| 配置 | 事件数 | 有效事件 | 平均组合收益 | 胜率 | 累计收益 | 平均持仓天数 |")
-    lines.append("|------|--------|----------|-------------|------|---------|-------------|")
+    lines.append("| 配置 | 事件数 | 有效 | 平均收益 | 胜率 | sum_ret | compound_ret | ann_ret | max_dd | 持仓天 |")
+    lines.append("|------|--------|------|---------|------|---------|-------------|---------|--------|--------|")
 
     for label, df in experiment_results.items():
         if df.height == 0:
-            lines.append(f"| {label} | 0 | 0 | - | - | - | - |")
+            lines.append(f"| {label} | 0 | 0 | - | - | - | - | - | - | - |")
             continue
 
         valid = df.filter(pl.col("portfolio_ret").is_not_null())
         n_events = df.height
         n_valid = valid.height
         if n_valid == 0:
-            lines.append(f"| {label} | {n_events} | 0 | - | - | - | - |")
+            lines.append(f"| {label} | {n_events} | 0 | - | - | - | - | - | - | - |")
             continue
 
-        mean_ret = valid["portfolio_ret"].mean()
+        rets = valid["portfolio_ret"]
+        mean_ret = rets.mean()
         win_rate = valid.filter(pl.col("portfolio_ret") > 0).height / n_valid
-        cum_ret = valid["portfolio_ret"].sum()
+        sum_ret = float(rets.sum())
+        compound_ret = float((1 + rets).product() - 1)
         avg_hold = valid["avg_holding_days"].mean()
+
+        # Annualized: assume ~avg_hold days per event, n_valid events
+        total_days = float(avg_hold * n_valid) if avg_hold else n_valid * 5
+        total_years = total_days / 252.0
+        ann_ret = ((1 + compound_ret) ** (1.0 / total_years) - 1) if total_years > 0 and compound_ret > -1 else 0.0
+
+        # Max drawdown on equity curve
+        equity = (1 + rets).cum_prod()
+        peak = equity.cum_max()
+        dd = (equity - peak) / peak
+        max_dd = float(dd.min())
 
         lines.append(
             f"| {label} | {n_events} | {n_valid} "
-            f"| {mean_ret:+.2%} | {win_rate:.0%} | {cum_ret:+.2%} "
+            f"| {mean_ret:+.2%} | {win_rate:.0%} "
+            f"| {sum_ret:+.2%} | {compound_ret:+.2%} "
+            f"| {ann_ret:+.1%} | {max_dd:+.1%} "
             f"| {avg_hold:.1f} |"
         )
 
