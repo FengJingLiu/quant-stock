@@ -10,8 +10,8 @@ AKShare Proxy Patch Helper
 import os
 
 # 默认配置
-TOKEN = os.getenv("AKSHARE_PROXY_TOKEN", "***AKSHARE_TOKEN***")
-PROXY_HOST = os.getenv("AKSHARE_PROXY_HOST", "***AKSHARE_HOST***")
+TOKEN = os.getenv("AKSHARE_PROXY_TOKEN", "")
+PROXY_HOST = os.getenv("AKSHARE_PROXY_HOST", "")
 RETRY = int(os.getenv("AKSHARE_PROXY_RETRY", "30"))
 
 

@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
+
 import akshare as ak
 import akshare_proxy_patch
 
+import _load_env  # noqa: F401
+
 
 def main() -> None:
-    akshare_proxy_patch.install_patch("***AKSHARE_HOST***", "***AKSHARE_TOKEN***", retry=30)
+    akshare_proxy_patch.install_patch(os.environ["AKSHARE_PROXY_HOST"], os.environ["AKSHARE_PROXY_TOKEN"], retry=30)
 
     names = ak.stock_board_industry_name_em()
     print("[board_names] rows=", 0 if names is None else len(names))

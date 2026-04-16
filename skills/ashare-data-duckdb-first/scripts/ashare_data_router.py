@@ -20,8 +20,8 @@ from typing import Any
 
 
 DEFAULT_DB_PATH = Path("/home/autumn/quant/stock/data/duckdb/stock.duckdb")
-DEFAULT_TOKEN = "***AKSHARE_TOKEN***"
-DEFAULT_PROXY_HOST = "***AKSHARE_HOST***"
+DEFAULT_TOKEN = os.environ.get("AKSHARE_PROXY_TOKEN", "")
+DEFAULT_PROXY_HOST = os.environ.get("AKSHARE_PROXY_HOST", "")
 
 
 @dataclass(frozen=True)

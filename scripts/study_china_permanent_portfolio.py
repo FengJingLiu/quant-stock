@@ -4,6 +4,7 @@
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 
 import akshare as ak
@@ -15,8 +16,8 @@ import pandas as pd
 from akquant import ExecutionMode, Strategy, run_backtest
 
 
-PROXY_HOST = "***AKSHARE_HOST***"
-PROXY_TOKEN = "***AKSHARE_TOKEN***"
+PROXY_HOST = os.environ["AKSHARE_PROXY_HOST"]
+PROXY_TOKEN = os.environ["AKSHARE_PROXY_TOKEN"]
 
 
 def parse_args():

@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -44,7 +45,7 @@ FORWARD_WINDOWS = [1, 3, 5, 10, 20]
 TOP_N = 20
 
 # ClickHouse 连接
-CH_KWARGS = dict(host="localhost", port=8123, username="default", password="***CH_PASSWORD***", database="astock")
+CH_KWARGS = dict(host="localhost", port=8123, username="default", password=os.environ["CH_PASSWORD"], database="astock")
 
 
 def get_ch() -> clickhouse_connect.driver.Client:

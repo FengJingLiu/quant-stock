@@ -29,8 +29,8 @@ import akshare as ak
 import akshare_proxy_patch
 import pandas as pd
 
-DEFAULT_PROXY_HOST = "***AKSHARE_HOST***"
-DEFAULT_TOKEN = os.getenv("AKSHARE_PROXY_TOKEN", "***AKSHARE_TOKEN***")
+DEFAULT_PROXY_HOST = os.environ["AKSHARE_PROXY_HOST"]
+DEFAULT_TOKEN = os.environ["AKSHARE_PROXY_TOKEN"]
 
 DEFAULT_CACHE = Path("data/multibagger_10x_5y_cache.csv")
 DEFAULT_OUT_LIST = Path("data/multibagger_10x_5y_list.csv")

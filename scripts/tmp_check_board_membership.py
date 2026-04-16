@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import akshare as ak
@@ -19,7 +20,7 @@ def normalize_symbol_code(raw: object) -> str:
 
 
 def main() -> None:
-    akshare_proxy_patch.install_patch("***AKSHARE_HOST***", "***AKSHARE_TOKEN***", retry=30)
+    akshare_proxy_patch.install_patch(os.environ["AKSHARE_PROXY_HOST"], os.environ["AKSHARE_PROXY_TOKEN"], retry=30)
 
     picks = pd.read_csv(
         Path("data/backtest_bank_metal_balance_502525/monthly_picks.csv")

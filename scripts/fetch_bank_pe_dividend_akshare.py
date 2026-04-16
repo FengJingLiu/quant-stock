@@ -186,14 +186,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--token",
         type=str,
-        default=os.getenv("AKSHARE_PROXY_TOKEN", "***AKSHARE_TOKEN***"),
-        help="akshare-proxy-patch token（默认: ***AKSHARE_TOKEN***；环境变量 AKSHARE_PROXY_TOKEN 可覆盖）",
+        default=os.getenv("AKSHARE_PROXY_TOKEN", ""),
+        help="akshare-proxy-patch token（环境变量 AKSHARE_PROXY_TOKEN）",
     )
     parser.add_argument(
         "--proxy-host",
         type=str,
-        default="***AKSHARE_HOST***",
-        help="akshare-proxy-patch 服务地址",
+        default=os.getenv("AKSHARE_PROXY_HOST", ""),
+        help="akshare-proxy-patch 服务地址（环境变量 AKSHARE_PROXY_HOST）",
     )
     parser.add_argument(
         "--proxy-retry",

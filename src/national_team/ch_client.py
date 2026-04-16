@@ -23,13 +23,7 @@ from datetime import date
 import clickhouse_connect
 import polars as pl
 
-_DEFAULT_CH = dict(
-    host="localhost",
-    port=8123,
-    username="default",
-    password="***CH_PASSWORD***",
-    database="astock",
-)
+from src.config import CH_HTTP_KWARGS as _DEFAULT_CH
 
 KLINES_SCHEMA = {
     "symbol": pl.Utf8,

@@ -31,6 +31,9 @@ package-lock.json
 .idea/
 .vscode/
 
+# ── 环境配置 ──────────────────────────────
+.env
+
 # ── 杂项 ──────────────────────────────────
 akquant_examples/
 BaiduPCS-Go_export_*.txt

@@ -24,8 +24,8 @@ import pandas as pd
 
 DEFAULT_OUTPUT = Path("data/stock_filter_ma120.csv")
 CACHE_DIR = Path("data/cache")
-TOKEN = "***AKSHARE_TOKEN***"
-PROXY_HOST = "***AKSHARE_HOST***"
+TOKEN = os.environ["AKSHARE_PROXY_TOKEN"]
+PROXY_HOST = os.environ["AKSHARE_PROXY_HOST"]
 
 
 def retry(func: Callable[[], Any], tries: int, base_sleep: float) -> Any:

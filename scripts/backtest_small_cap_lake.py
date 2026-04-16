@@ -15,6 +15,7 @@ Local-first policy
 from __future__ import annotations
 
 import argparse
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Iterable
@@ -26,8 +27,8 @@ import pandas as pd
 from akquant import ExecutionMode, Strategy, run_backtest
 
 
-PROXY_HOST = "***AKSHARE_HOST***"
-PROXY_TOKEN = "***AKSHARE_TOKEN***"
+PROXY_HOST = os.environ["AKSHARE_PROXY_HOST"]
+PROXY_TOKEN = os.environ["AKSHARE_PROXY_TOKEN"]
 INDEX_CODE = "000852"
 
 

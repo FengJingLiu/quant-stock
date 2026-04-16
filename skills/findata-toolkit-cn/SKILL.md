@@ -27,11 +27,8 @@ pip install -r requirements.txt
 
 ## 代理配置
 
-所有脚本使用 `akshare_proxy_patch` 自动代理 AKShare 请求，无需手动配置。默认代理服务器：
-- **Host**: `***AKSHARE_HOST***`
-- **Token**: `***AKSHARE_TOKEN***`
+所有脚本使用 `akshare_proxy_patch` 自动代理 AKShare 请求，无需手动配置。代理参数通过环境变量配置：
 
-可通过环境变量自定义：
 ```bash
 export AKSHARE_PROXY_HOST="your-proxy-host"
 export AKSHARE_PROXY_TOKEN="your-token"

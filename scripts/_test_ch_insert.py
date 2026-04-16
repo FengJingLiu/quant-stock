@@ -1,13 +1,17 @@
 """临时验证脚本：测试修复后的 transform + insert 流程"""
+import os
 import zipfile, io
+
 import pandas as pd
 from clickhouse_driver import Client
+
+import _load_env  # noqa: F401
 
 CHUNK = 200_000
 COLS = ['symbol','trade_date','datetime','open','high','low','close','volume','amount','vwap']
 zp = '/home/autumn/quant/stock/data/基金分钟数据/ETF分钟数据_汇总/ETF_1min_2005_2022.zip'
 
-c = Client(host='localhost', port=9000, user='default', password='***CH_PASSWORD***', compression='lz4')
+c = Client(host='localhost', port=9000, user='default', password=os.environ["CH_PASSWORD"], compression='lz4')
 c.execute('TRUNCATE TABLE astock.klines_1m_etf')
 
 def transform(df):

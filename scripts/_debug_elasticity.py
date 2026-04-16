@@ -1,9 +1,13 @@
 """Debug: test symbol mapping and daily aggregation from klines_1m_stock."""
+import os
+
 import clickhouse_connect
 import time
 
+import _load_env  # noqa: F401
+
 ch = clickhouse_connect.get_client(
-    host="localhost", port=8123, username="default", password="***CH_PASSWORD***", database="astock"
+    host="localhost", port=8123, username="default", password=os.environ["CH_PASSWORD"], database="astock"
 )
 
 # 1. Symbol mapping: con_code (600519.SH) -> klines_1m_stock symbol (sh600519)

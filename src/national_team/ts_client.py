@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import tushare as ts
 
-_TUSHARE_TOKEN = "***TUSHARE_TOKEN***"
-_TUSHARE_API_URL = "http://***TUSHARE_HOST***:8010/"
+from src.config import TUSHARE_TOKEN as _TUSHARE_TOKEN
+from src.config import TUSHARE_API_URL as _TUSHARE_API_URL
 
 _pro: ts.pro.client.DataApi | None = None
 

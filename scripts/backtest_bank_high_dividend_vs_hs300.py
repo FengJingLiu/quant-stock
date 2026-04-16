@@ -13,6 +13,7 @@ Methodology
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -338,7 +339,7 @@ def fetch_hs300_from_local(
 def fetch_hs300_from_akshare(
     start_date: pd.Timestamp, end_date: pd.Timestamp
 ) -> pd.Series:
-    akshare_proxy_patch.install_patch("***AKSHARE_HOST***", "***AKSHARE_TOKEN***", retry=30)
+    akshare_proxy_patch.install_patch(os.environ["AKSHARE_PROXY_HOST"], os.environ["AKSHARE_PROXY_TOKEN"], retry=30)
     df = cast(pd.DataFrame, ak.stock_zh_index_daily_em(symbol="sh000300"))
     if df is None or df.empty:
         raise RuntimeError("AkShare returned empty data for sh000300")

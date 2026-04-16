@@ -25,12 +25,15 @@
 
 import io
 import logging
+import os
 import sys
 import zipfile
 from pathlib import Path
 
 import pandas as pd
 from clickhouse_driver import Client
+
+import _load_env  # noqa: F401
 
 # ── 路径 ─────────────────────────────────────────────────────────────────
 BASE = Path("/home/autumn/quant/stock/data/基金分钟数据/基金_复权因子")
@@ -46,7 +49,7 @@ CH_KW = dict(
     host="localhost",
     port=9000,
     user="default",
-    password="***CH_PASSWORD***",
+    password=os.environ["CH_PASSWORD"],
     compression="lz4",
     settings={"max_insert_block_size": 500_000},
 )

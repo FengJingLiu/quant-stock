@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from datetime import date, datetime
@@ -36,7 +37,7 @@ CH_CONFIG = dict(
     host="localhost",
     port=8123,
     username="default",
-    password="***CH_PASSWORD***",
+    password=os.environ["CH_PASSWORD"],
     database="astock",
 )
 

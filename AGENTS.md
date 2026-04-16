@@ -1,8 +1,9 @@
 1 data/AGENTS.md 有数据的使用说明，优先使用本地数据（LAKE DUCKDb），没有再使用 Akshare 在线获取数据。
 2 Akshare 使用 akshare_proxy_patch 插件
 ```
-TOKEN = "***AKSHARE_TOKEN***"
-PROXY_HOST = "***AKSHARE_HOST***"
+import os
+TOKEN = os.environ["AKSHARE_PROXY_TOKEN"]
+PROXY_HOST = os.environ["AKSHARE_PROXY_HOST"]
 akshare_proxy_patch.install_patch(PROXY_HOST, TOKEN, retry=30)
 ```
 3 使用 .venv/ python 环境

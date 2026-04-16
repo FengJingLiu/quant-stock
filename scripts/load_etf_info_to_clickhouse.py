@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """将 ETF基础信息列表.csv 写入 ClickHouse astock.dim_etf_info 表。"""
 
+import os
+
 import pandas as pd
 from datetime import date as D
 from clickhouse_driver import Client
+
+import _load_env  # noqa: F401
 
 CSV = "data/基金分钟数据/ETF基础信息列表.csv"
 
 CH_KW = dict(
     host="localhost", port=9000,
-    user="default", password="***CH_PASSWORD***",
+    user="default", password=os.environ["CH_PASSWORD"],
     compression="lz4",
 )
 
