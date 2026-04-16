@@ -1,11 +1,13 @@
 # Skills 技能目录
 
-本目录包含 15 个 FinSkills 中国市场投资分析技能，涵盖从股票筛选、财务分析到组合管理的完整投资研究流程。
+本目录包含 17 个 FinSkills 中国市场投资分析技能，涵盖从股票筛选、财务分析到组合管理，以及 AKQuant 策略工程开发的完整流程。
 
 ## 目录结构
 
 ```
 skills/
+├── ashare-data-duckdb-first/         # A股数据路由器（本地DuckDB优先）
+├── akquant-strategy-copilot/         # AKQuant 策略/回测代码助手
 ├── esg-screener/                      # ESG筛选器
 ├── event-driven-detector/             # 事件驱动机会识别器
 ├── financial-statement-analyzer/      # 财务报表深度分析
@@ -65,7 +67,14 @@ skills/
 
 | 技能 | 用途 |
 |------|------|
+| **A股数据路由器（本地优先）** (`ashare-data-duckdb-first`) | 获取A股历史/最新数据，优先本地 `data/duckdb/stock.duckdb`，不满足再自动回退 AkShare + `akshare_proxy_patch` |
 | **金融数据工具包** (`findata-toolkit-cn`) | A股实时数据：行情、财务指标、董监高增减持、北向资金、宏观数据（LPR、PMI、CPI、M2） |
+
+### 五、策略工程（Strategy Engineering）
+
+| 技能 | 用途 | 触发关键词 |
+|------|------|-----------|
+| **AKQuant 策略开发 Copilot** (`akquant-strategy-copilot`) | 基于 `akquant_examples/examples` 生成、改造和调试 AKQuant 策略与回测脚本 | "AKQuant"、"akquant策略"、"回测脚本"、"run_backtest"、"execution_mode"、"warmup_period"、"on_bar"、"on_timer"、"order_target_weights"、"因子表达式"、"示例迁移" |
 
 ## 快速使用指南
 
@@ -102,6 +111,13 @@ pip install -r requirements.txt
 "用30万帮我构建一个稳健型投资组合" → 使用 risk-adjusted-return-optimizer
 "帮我诊断一下我的持仓有什么风险" → 使用 portfolio-health-check
 "为这个投资建议生成一份适当性报告" → 使用 suitability-report-generator
+```
+
+**策略工程类**：
+```
+"参考 akquant_examples/examples 写一个双均线策略" → 使用 akquant-strategy-copilot
+"帮我排查 run_backtest 参数和执行模式" → 使用 akquant-strategy-copilot
+"按官方示例改造一个多标的轮动脚本" → 使用 akquant-strategy-copilot
 ```
 
 ## 数据说明

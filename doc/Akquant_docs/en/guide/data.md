@@ -1,0 +1,204 @@
+# Data Preparation and Loading Guide
+
+Data is the cornerstone of quantitative backtesting. As a high-performance backtesting framework, AKQuant has specific requirements for data format and quality. This document details how to prepare, clean, and load data to ensure smooth backtesting.
+
+## 1. Data Format Standard
+
+AKQuant's core engine (Rust) and Python interface layer primarily interact via `pandas.DataFrame` or `List[Bar]`. The most recommended way is to use **Pandas DataFrame**.
+
+### 1.1 Required Columns
+
+Your DataFrame **must** contain the following columns (column names are case-insensitive but are converted to lowercase internally):
+
+| Column Name | Type | Description |
+| :--- | :--- | :--- |
+| `date` / `time` / `datetime` | `datetime64[ns]` | Timestamp index. Must be Pandas datetime type. |
+| `open` | `float` | Open price |
+| `high` | `float` | High price |
+| `low` | `float` | Low price |
+| `close` | `float` | Close price |
+| `volume` | `float` | Trading volume |
+| `symbol` | `str` | Ticker symbol (e.g., "000001", "AAPL") |
+
+**Note:**
+
+1.  **Column Standardization**: It is recommended to rename columns to lowercase English (e.g., `open`, `close`) before passing them in.
+2.  **Symbol Column**: Even if backtesting a single stock, you must include the `symbol` column so the engine can identify the asset.
+
+### 1.2 Index
+
+*   The DataFrame index can be a default integer index or a `DatetimeIndex`.
+*   If using `DatetimeIndex`, AKQuant automatically treats it as the time column.
+*   **Sorting**: Data must be sorted by time in **ascending** order (Old -> New).
+
+---
+
+## 2. Data Loading Examples
+
+### 2.1 Loading from CSV
+
+This is the most common method. Assume you have a `data.csv` file.
+
+```python
+import pandas as pd
+from akquant import run_backtest
+
+# 1. Read CSV
+df = pd.read_csv("data.csv")
+
+# 2. Convert Time Column
+# Ensure the time column is datetime type, not string
+df['date'] = pd.to_datetime(df['date'])
+
+# 3. Ensure Correct Column Names
+# Assume CSV columns are "Date", "Open", ...
+df.columns = [c.lower() for c in df.columns]
+
+# 4. Add Symbol Column (if not in CSV)
+if 'symbol' not in df.columns:
+    df['symbol'] = "DEMO_TICKER"
+
+# 5. Sort
+df = df.sort_values('date').reset_index(drop=True)
+
+# 6. Pass to Backtest
+# result = run_backtest(data=df, ...)
+```
+
+### 2.2 Using AKShare (China A-Shares)
+
+[AKShare](https://github.com/akfamily/akshare) is a powerful open-source financial data interface library.
+
+```python
+import akshare as ak
+import pandas as pd
+
+# 1. Download Data (Example: Forward Adjusted)
+# period="daily"; adjust="qfq" (forward adjusted)
+df = ak.stock_zh_a_hist(symbol="000001", period="daily", start_date="20200101", end_date="20231231", adjust="qfq")
+
+# 2. Rename Columns (AKShare returns Chinese columns)
+df = df.rename(columns={
+    "日期": "date",
+    "开盘": "open",
+    "最高": "high",
+    "最低": "low",
+    "收盘": "close",
+    "成交量": "volume"
+})
+
+# 3. Type Conversion
+df['date'] = pd.to_datetime(df['date'])
+df['symbol'] = "000001"
+
+# 4. Filter Columns
+df = df[["date", "open", "high", "low", "close", "volume", "symbol"]]
+```
+
+### 2.3 Using yfinance (US Stocks)
+
+```python
+import yfinance as yf
+
+# 1. Download Data
+df = yf.download("AAPL", start="2020-01-01", end="2023-12-31")
+
+# yfinance returns MultiIndex columns (if multiple tickers) or Capitalized columns
+# Simplified here for single stock
+df.columns = [c.lower() for c in df.columns]
+df.reset_index(inplace=True) # Turn Date index into column
+df = df.rename(columns={"date": "date"}) # Ensure it is date
+
+df['symbol'] = "AAPL"
+```
+
+### 2.4 Using DataFeedAdapter with Multi-Timeframe Aggregation
+
+If you want a single entry that combines data loading and timeframe transformation, use `DataFeedAdapter` directly:
+
+```python
+import akquant as aq
+
+base = aq.CSVFeedAdapter(path_template="/data/{symbol}.csv")
+
+feed_15m = base.resample(freq="15min", emit_partial=False)
+feed_1h = base.replay(
+    freq="1h",
+    align="session",            # session | day | global
+    day_mode="trading",         # effective only when align='day': trading | calendar
+    emit_partial=False,
+    session_windows=[("09:30", "11:30"), ("13:00", "15:00")],  # session only
+)
+
+result = aq.run_backtest(
+    data=feed_1h,
+    strategy=MyStrategy,
+    symbol="000001",
+    show_progress=False,
+)
+```
+
+Parameter semantics:
+
+*   `align="session"`: Partition by trading day, optionally with `session_windows`.
+*   `align="day"`: Partition by day without `session_windows`; `day_mode` supports `trading/calendar`.
+*   `align="global"`: Aggregate on the full timeline without day partitioning.
+
+---
+
+## 3. Multi-Symbol Data
+
+If you need to backtest multiple stocks simultaneously (e.g., a market-wide selection strategy), there are two ways to pass data:
+
+### Method A: Single DataFrame (Recommended)
+
+Concatenate data for all stocks into one large DataFrame.
+
+```python
+# Assume df_a, df_b are data for two stocks
+df_all = pd.concat([df_a, df_b])
+
+# Must sort by time! AKQuant is an event-driven engine that pushes data by time flow
+df_all = df_all.sort_values(['date', 'symbol'])
+
+# run_backtest(data=df_all, ...)
+```
+
+### Method B: Dictionary (Dict of DataFrames)
+
+```python
+data_map = {
+    "AAPL": df_aapl,
+    "MSFT": df_msft
+}
+
+# run_backtest(data=data_map, ...)
+# The engine internally merges and sorts them automatically
+```
+
+---
+
+## 4. Advanced Topics
+
+### 4.1 Warmup Period
+
+When calculating technical indicators (e.g., MA60, MACD), the `warmup_period` mechanism allows the strategy to "digest" a portion of historical data before official trading begins.
+
+*   **Issue**: If a strategy needs to calculate MA60 on the first day but receives data starting exactly from the backtest start date, the first 59 days cannot produce indicator values.
+*   **Solution**: Ensure the provided data starts earlier than `start_time`.
+*   **Configuration**: Set `warmup_period = 60` in the strategy. The engine will automatically consume the first 60 bars from the data stream solely for updating indicators, without triggering `on_bar` logic.
+
+### 4.2 Fetching History (`get_history`)
+
+In a strategy, you can fetch historical market data for the past N days at any time.
+
+*   `self.get_history(n, symbol, field)`: Returns a `numpy.ndarray`, extremely high performance (zero-copy).
+*   `self.get_history_df(n, symbol)`: Returns a `pd.DataFrame`, convenient for Pandas calculations.
+
+**Note**: `get_history` fetches data **prior to the current moment**, excluding the current Bar (to avoid look-ahead bias). If you need the current Bar's data for calculation, append it manually.
+
+### 4.3 Timezone
+
+AKQuant internally uses UTC timestamps uniformly.
+If your data is in local time (e.g., Beijing Time), please specify `timezone="Asia/Shanghai"` in `run_backtest`.
+For more details, refer to the [Timezone Handling Guide](../advanced/timezone.md).

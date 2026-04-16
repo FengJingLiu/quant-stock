@@ -1,0 +1,23 @@
+{
+  "skill_name": "akquant-strategy-copilot",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "参考 akquant_examples/examples/strategies/01_stock_dual_moving_average.py，帮我写一个双均线 AKQuant 回测脚本。要求：快慢线可配置、warmup_period 正确设置、打印 result.metrics 与前 5 行 orders_df。",
+      "expected_output": "输出完整可运行 Python 脚本，包含 Strategy 子类、on_bar 逻辑、run_backtest 调用和结果打印；策略参数可调。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "请按 examples/43_target_weights_rebalance.py 的模式，写一个三标的 Top2 动量轮动策略。要求用 order_target_weights 一次调仓，并显式处理未入选标的清仓。",
+      "expected_output": "输出完整脚本，包含时间片收齐逻辑、动量打分、TopN 选股、target_weights 计算；在 order_target_weights(..., liquidate_unmentioned=True) 中显式处理未入选标的；run_backtest 对多标的使用 symbol=list(data.keys())，并通过 warmup_period 或 history_depth 保证窗口可用。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "写一个 AKQuant 定时器轮动策略：在 on_start 里 add_daily_timer('14:55:00','rebalance')，on_timer 做两只股票动量比较并切仓。参考 strategies/05_stock_momentum_rotation_timer.py。要求说明默认 NextOpen 下信号与成交时点关系。",
+      "expected_output": "输出完整策略代码，包含 on_start/on_timer、历史数据长度检查、仓位切换逻辑与回测执行示例；明确说明 ExecutionMode.NextOpen 是下一根 Bar 成交，若改用 ExecutionMode.CurrentClose 需要给出原因。",
+      "files": []
+    }
+  ]
+}

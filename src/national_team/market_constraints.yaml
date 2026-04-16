@@ -1,0 +1,84 @@
+# A股交易约束 — CNExecutionModel 输入协议
+# 本文件定义 A 股市场仿真执行引擎所需的全部约束参数
+
+# ── 交易日历 ──────────────────────────────────────────────────
+calendar:
+  exchange: SSE                  # 上交所日历 (深交所同步)
+  session:
+    morning:  ["09:30", "11:30"]
+    afternoon: ["13:00", "15:00"]
+  call_auction:
+    open:  ["09:15", "09:25"]    # 开盘集合竞价
+    close: ["14:57", "15:00"]    # 收盘集合竞价 (仅沪市2018+, 深市2006+)
+
+# ── T+1 结算 ──────────────────────────────────────────────────
+settlement:
+  stock:
+    t_plus: 1                    # 当日买入 T+1 才可卖出
+    sell_locked_until: "next_open"
+  etf:
+    t_plus: 0                    # 场内 ETF 支持 T+0 申赎 (但二级市场仍 T+1 卖出)
+    note: "二级市场买入的 ETF 份额仍 T+1 卖出"
+
+# ── 涨跌停 ────────────────────────────────────────────────────
+price_limit:
+  主板:
+    normal_pct: 0.10             # ±10%
+    st_pct: 0.05                 # ST ±5%
+    ipo_first_day_pct: 0.44      # 首日 +44%/-36%
+    ipo_first_day_down_pct: 0.36
+  创业板:
+    normal_pct: 0.20             # ±20%
+    st_pct: 0.05                 # ST ±5%
+    ipo_no_limit_days: 5         # 前5日不设涨跌停
+  科创板:
+    normal_pct: 0.20             # ±20%
+    st_pct: 0.05                 # ST ±5% (注: 科创板无ST, 退市直接退)
+    ipo_no_limit_days: 5         # 前5日不设涨跌停
+  北交所:
+    normal_pct: 0.30             # ±30%
+    st_pct: 0.05
+    ipo_no_limit_days: 0         # 首日无涨跌停限制但有临时停牌
+
+# ── 最小交易单位 ──────────────────────────────────────────────
+lot_size:
+  stock: 100                     # 1手 = 100股 (买入必须整手)
+  stock_sell_odd: true           # 卖出允许零股 (不足1手可一次卖出)
+  etf: 100                       # ETF 1手 = 100份
+  bond_conv: 10                  # 可转债 1手 = 10张
+
+# ── 费用 ──────────────────────────────────────────────────────
+fees:
+  commission:
+    rate: 0.00025                # 万2.5 (含规费)
+    min_per_trade: 5.0           # 单笔最低 5 元
+  stamp_tax:
+    sell_rate: 0.0005            # 千分之0.5 (仅卖出, 2023-08-28 起)
+    buy_rate: 0.0                # 买入免印花税
+  transfer_fee:
+    rate: 0.00001                # 万0.1 (沪深均收, 2022-04-29 起)
+
+# ── 执行约束 ──────────────────────────────────────────────────
+execution:
+  # 涨停无法买入 (卖盘枯竭)
+  limit_up_buy: false
+  # 跌停无法卖出 (买盘枯竭)
+  limit_down_sell: false
+  # 一字涨停 (open=high=low=close=涨停价): 完全无法买入
+  one_word_limit_up_buy: false
+  # 一字跌停: 完全无法卖出
+  one_word_limit_down_sell: false
+  # 停牌: 无法买卖
+  suspended_trade: false
+  # 部分成交: 可选模拟成交量限制
+  partial_fill:
+    enabled: true
+    max_participation_rate: 0.10  # 单笔不超过当bar成交量的10%
+
+# ── 维度表映射 (ClickHouse) ───────────────────────────────────
+dim_tables:
+  stock_info: "astock.dim_stock_info"
+  namechange: "astock.dim_namechange"
+  suspend_daily: "astock.dim_suspend_daily"
+  stk_limit_daily: "astock.dim_stk_limit_daily"
+  index_weights: "astock.dim_index_weights"

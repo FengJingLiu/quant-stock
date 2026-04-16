@@ -1,0 +1,272 @@
+# 参数优化指南
+
+参数优化是量化策略开发中至关重要的一环。AKQuant 提供了强大的优化工具，帮助你探索参数对策略表现的影响，并评估策略的稳健性。
+
+目前支持两种主要的优化模式：
+
+1.  **网格搜索 (Grid Search)**: `run_grid_search`
+2.  **滚动优化 (Walk-Forward Optimization)**: `run_walk_forward`
+
+---
+
+## 1. 网格搜索 (Grid Search)
+
+网格搜索是一种穷举式的参数优化方法。它通过遍历给定的参数组合，在同一段历史数据上运行回测，从而找到表现最优的参数组合。
+
+### 适用场景
+*   探索策略对参数的敏感性。
+*   确定参数的大致合理范围。
+*   寻找策略在历史数据上的"理论上限"。
+
+### 使用方法
+
+使用 `akquant.run_grid_search` 函数：
+
+```python
+from akquant import run_grid_search, Strategy
+
+# 1. 定义策略
+class MyStrategy(Strategy):
+    def __init__(self, ma_period, stop_loss):
+        # ...
+
+# 2. 定义参数网格
+param_grid = {
+    "ma_period": [10, 20, 30],
+    "stop_loss": [0.01, 0.02, 0.05]
+}
+
+# 3. 运行网格搜索
+results = run_grid_search(
+    strategy=MyStrategy,
+    param_grid=param_grid,
+    data=df,
+    sort_by="sharpe_ratio",  # 按夏普比率排序
+    ascending=False          # 降序
+)
+
+print(results.head())
+```
+
+### 参数模型驱动优化（推荐）
+
+当你需要把策略接入页面配置（例如 Web UI / API）时，建议采用 **`PARAM_MODEL + param_grid` 双层结构**：
+
+1. `PARAM_MODEL`（来自 `akquant.params`）用于**单次回测参数校验与 schema 导出**；
+2. `param_grid`（`run_grid_search` 原生接口）用于**离散参数组合搜索**。
+
+这样既保留了优化内核的稳定性，也能让前端自动生成参数表单。
+
+```python
+from akquant import (
+    IntParam,
+    ParamModel,
+    Strategy,
+    get_strategy_param_schema,
+    validate_strategy_params,
+    run_grid_search,
+)
+
+
+class SmaParams(ParamModel):
+    fast_period: int = IntParam(10, ge=2, le=200, title="快线")
+    slow_period: int = IntParam(30, ge=3, le=500, title="慢线")
+
+
+class SmaStrategy(Strategy):
+    PARAM_MODEL = SmaParams
+
+    def __init__(self, fast_period: int = 10, slow_period: int = 30):
+        self.fast_period = fast_period
+        self.slow_period = slow_period
+
+
+schema = get_strategy_param_schema(SmaStrategy)
+runtime_params = validate_strategy_params(
+    SmaStrategy,
+    {"fast_period": 12, "slow_period": 36},
+)
+
+results = run_grid_search(
+    strategy=SmaStrategy,
+    data=df,
+    param_grid={"fast_period": [5, 10, 15], "slow_period": [20, 30, 60]},
+)
+```
+
+如果策略没有声明 `PARAM_MODEL`，适配层会回退到 `__init__` 签名做基础推断，以兼容历史策略。
+
+### 多目标优化 (Multi-Objective Optimization)
+
+在实际交易中，单一指标往往存在局限性（例如仅看夏普比率可能选出只交易一次的幸存者）。AKQuant 支持基于多个指标进行排序：
+
+```python
+results = run_grid_search(
+    strategy=MyStrategy,
+    param_grid=param_grid,
+    data=df,
+    sort_by=["sharpe_ratio", "total_return"], # 优先按夏普，其次按总收益
+    ascending=[False, False]                  # 均为降序
+)
+```
+
+### 结果筛选 (Result Filtering)
+
+为了避免“幸存者偏差”或过滤掉不符合风控要求的参数组合（例如交易次数过少、最大回撤过大），你可以使用 `result_filter` 回调函数：
+
+```python
+def result_filter(metrics):
+    # 筛选条件：
+    # 1. 交易次数 >= 50
+    # 2. 夏普比率 > 1.0
+    # 3. 最大回撤 < 20%
+    return (
+        metrics.get("trade_count", 0) >= 50 and
+        metrics.get("sharpe_ratio", 0) > 1.0 and
+        metrics.get("max_drawdown_pct", 1.0) < 0.2
+    )
+
+results = run_grid_search(
+    ...,
+    result_filter=result_filter
+)
+```
+
+### 核心参数
+
+*   `strategy`: 策略类。
+*   `param_grid`: 参数字典，key 为参数名，value 为参数值列表。
+*   `data`: 回测数据。
+*   `sort_by`: 排序指标，支持字符串或字符串列表。
+*   `ascending`: 排序方向，支持布尔值或布尔值列表。
+*   `result_filter`: (可选) 结果筛选回调函数，用于过滤不符合条件的组合。
+*   `warmup_calc`: (可选) 动态计算预热期的回调函数。
+*   `constraint`: (可选) 参数约束回调函数，用于过滤无效组合。
+
+### 资源控制与异常处理 (Resource Control & Error Handling)
+
+当参数组合数量庞大或某些组合可能导致死循环/内存溢出时，可以通过以下参数进行控制：
+
+```python
+results = run_grid_search(
+    ...,
+    timeout=60.0,           # 单次任务最长运行 60 秒，超时则跳过
+    max_tasks_per_child=1   # 强制每个 Worker 进程只执行 1 个任务后重启
+)
+```
+
+*   `timeout`: 单个回测任务的超时时间（秒）。如果任务在指定时间内未完成，将被标记为失败并跳过。这对于防止某些参数导致的死循环非常有用。
+*   `max_tasks_per_child`: Worker 进程重启频率。设置为 `1` 可以强制每次任务都使用新的进程，有效防止内存泄漏（OOM）或清理超时残留的线程资源。
+
+### 持久化与断点续传 (Persistence & Resume)
+
+对于参数组合极多（如 > 10,000 组）的场景，单机运行可能需要数小时甚至数天。如果中途断电或程序崩溃，重新运行将非常耗时。AKQuant 支持将优化结果实时写入 SQLite 数据库，并支持断点续传。
+
+```python
+results = run_grid_search(
+    ...,
+    db_path="optimization_results.db"  # 指定数据库路径
+)
+```
+
+*   `db_path`: SQLite 数据库文件路径。
+    *   **实时保存**: 每完成一个参数组合的回测，结果（参数、指标、耗时、错误信息）都会立即写入数据库。
+    *   **断点续传**: 程序启动时会自动检查数据库。如果发现某个参数组合已经运行过（基于参数的 JSON 匹配），将直接跳过，只运行剩余的任务。
+    *   **结果复用**: 你可以编写脚本从数据库中读取结果进行后续分析，而无需重新运行回测。
+
+### ⚠️ 风险提示
+网格搜索容易导致 **过拟合 (Overfitting)**。选出的"最优参数"可能只是恰好适应了这段历史数据的噪声，在未来实盘中往往失效。切勿直接使用网格搜索的最优结果进行实盘。
+
+---
+
+## 2. 滚动优化 (Walk-Forward Optimization)
+
+滚动优化（Walk-Forward Analysis/Optimization, WFO）是一种更接近实战的验证方法。它模拟了真实的时间流逝，将数据切分为多个 `[训练集 | 测试集]` 窗口，不断滚动进行"样本内优化"和"样本外验证"。
+
+### 适用场景
+*   验证策略的真实稳健性。
+*   评估策略在"未知"数据上的表现。
+*   生成随时间动态调整的参数路径。
+
+### 原理
+WFO 的核心思想是：**永远只用过去的数据来决定现在的参数**。
+
+1.  **窗口 1**:
+    *   **训练 (In-Sample)**: 使用 1-3月数据进行 Grid Search，找到最优参数 A。
+    *   **测试 (Out-of-Sample)**: 使用参数 A 在 4月数据上进行回测。
+2.  **窗口 2**:
+    *   **训练**: 滚动到 2-4月，重新 Grid Search，找到最优参数 B。
+    *   **测试**: 使用参数 B 在 5月数据上进行回测。
+3.  **拼接**: 将所有测试段的结果拼接，形成最终的资金曲线。
+
+### 使用方法
+
+使用 `akquant.run_walk_forward` 函数：
+
+```python
+from akquant import run_walk_forward
+
+# 运行 WFO
+wfo_results = run_walk_forward(
+    strategy=MyStrategy,
+    param_grid=param_grid,
+    data=df,
+    train_period=250,      # 训练窗口长度 (例如250个Bar)
+    test_period=60,        # 测试/滚动步长 (例如60个Bar)
+    metric="sharpe_ratio", # 优化目标
+    initial_cash=100_000.0,
+    warmup_calc=warmup_calc, # 支持动态预热
+    constraint=param_constraint # 支持参数约束
+)
+
+# wfo_results 包含拼接后的资金曲线和每段使用的参数
+print(wfo_results)
+```
+
+### 核心参数
+
+*   `train_period`: 训练窗口长度 (Bar数量)。窗口越长，参数越稳定；窗口越短，适应变化越快。
+*   `test_period`: 测试窗口长度 (Bar数量)。通常也是滚动的步长。
+*   `metric`: 在训练集上选择最优参数的依据指标。支持单个字符串 (如 `"sharpe_ratio"`) 或字符串列表 (如 `["sharpe_ratio", "total_return"]`)。
+*   `ascending`: 排序方向，与 `metric` 对应。支持布尔值或布尔值列表 (默认 `False`，即降序)。
+*   `result_filter`: (可选) 结果筛选回调函数，在每个训练窗口中过滤不符合条件的参数组合。
+
+---
+
+## 3. 高级功能
+
+### 动态预热期 (Dynamic Warmup)
+
+不同的参数组合可能需要不同的预热期（例如长均线策略需要更多历史数据）。你可以通过 `warmup_calc` 回调函数动态指定：
+
+```python
+def warmup_calc(params):
+    # 预热期 = 长期均线窗口 + 1
+    return params["long_window"] + 1
+
+run_grid_search(..., warmup_calc=warmup_calc)
+```
+
+### 参数约束 (Constraint)
+
+有些参数组合在逻辑上是无效的（例如短期均线 > 长期均线）。通过 `constraint` 回调函数可以提前过滤这些组合，节省计算资源：
+
+```python
+def param_constraint(params):
+    # 只保留短期窗口 < 长期窗口的组合
+    return params["short_window"] < params["long_window"]
+
+run_grid_search(..., constraint=param_constraint)
+```
+
+---
+
+## 4. Grid Search vs Walk-Forward 对比
+
+| 特性 | Grid Search (网格搜索) | Walk-Forward (滚动优化) |
+| :--- | :--- | :--- |
+| **数据使用** | 使用全部数据一次性优化 | 数据滚动切分，训练集/测试集严格分离 |
+| **参数结果** | **1 组** 全局静态参数 | **多组** 动态变化的参数 |
+| **过拟合风险** | **极高** (看着答案找最优解) | **低** (模拟真实未知环境) |
+| **核心目的** | 探索参数敏感性，找“理论上限” | 验证策略稳健性，评估“实战预期” |
+| **代码对应** | `akquant.run_grid_search` | `akquant.run_walk_forward` |

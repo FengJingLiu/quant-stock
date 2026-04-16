@@ -13,4 +13,12 @@ dependencies = [
     "matplotlib>=3.10.8",
     "adata>=2.9.5",
     "duckdb>=1.4.4",
+    "pyright>=1.1.408",
+    "tushare>=1.4.29",
 ]
+
+[tool.pyright]
+pythonVersion = "3.13"
+venvPath = "/home/autumn/quant/stock/.venv"
+include = ["."]
+exclude = [".venv", "__pycache__", "*.pyc"]
