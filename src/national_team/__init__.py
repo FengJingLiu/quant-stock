@@ -10,10 +10,16 @@ national_team — 国家队跟踪策略因子模块
 数据源: ClickHouse astock 数据库 (1分钟K线 + 复权因子)
 """
 
+from src.national_team.etf_cluster import ETFCluster
 from src.national_team.etf_resonance import ETFResonance
 from src.national_team.etf_sell_resonance import ETFSellResonance
 from src.national_team.nt_buy_prob import NTBuyProb
 from src.national_team.nt_sell_prob import NTSellProb
 from src.national_team.spread_spike import SpreadSpike
 
-__all__ = ["NTBuyProb", "NTSellProb", "ETFResonance", "ETFSellResonance", "SpreadSpike"]
+__all__ = [
+    "ETFCluster",
+    "NTBuyProb", "NTSellProb",
+    "ETFResonance", "ETFSellResonance",
+    "SpreadSpike",
+]

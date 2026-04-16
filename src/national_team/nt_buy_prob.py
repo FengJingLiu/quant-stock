@@ -15,6 +15,14 @@ v2 改进 (基于方法论优化)
   logit = w1*stress + w2*vol_shock + w3*absorption + w4*resonance + w5*lead_gap + bias
   prob = sigmoid(logit)
 
+v3 升级 (ETF 簇共振)
+--------------------
+当提供 cluster_data (来自 ETFCluster) 时，使用 4 分量组合:
+  NT_Buy_Prob = 0.45 * same_index_resonance
+              + 0.25 * main_etf_absorption
+              + 0.20 * cross_index_follow_through
+              + 0.10 * stock_propagation
+
 使用
 ----
 >>> from src.national_team.nt_buy_prob import NTBuyProb
@@ -70,7 +78,7 @@ class NTBuyProb:
     vol_shock_q99: float = 2.326
     """触发共振的 z-score 阈值 (≈正态分布 99 分位)"""
 
-    # ── sigmoid 组合权重 ─────────────────────────────────────────────────
+    # ── sigmoid 组合权重 (v2 legacy) ──────────────────────────────────────
     w_stress: float = field(default=2.0, repr=False)
     """stress_context 权重"""
     w_vol_shock: float = field(default=1.5, repr=False)
@@ -83,6 +91,18 @@ class NTBuyProb:
     """lead_gap 权重"""
     bias: float = field(default=-5.0, repr=False)
     """sigmoid 偏置项 (sigmoid(-5) ≈ 0.7%)"""
+
+    # ── v3 四分量权重 (当 cluster_data 可用时使用) ────────────────────────
+    w_same_index: float = field(default=0.45, repr=False)
+    """同指数簇共振权重"""
+    w_main_etf: float = field(default=0.25, repr=False)
+    """主 ETF absorption 权重"""
+    w_cross_index: float = field(default=0.20, repr=False)
+    """跨指数跟随权重"""
+    w_stock_prop: float = field(default=0.10, repr=False)
+    """个股传导权重 (stress_context)"""
+    bias_v3: float = field(default=-3.0, repr=False)
+    """v3 sigmoid 偏置项"""
 
     ch_kwargs: dict | None = None
 
@@ -97,15 +117,20 @@ class NTBuyProb:
         etf_1m: pl.DataFrame,
         index_1m: pl.DataFrame,
         fleet_etf_data: dict[str, pl.DataFrame] | None = None,
+        cluster_data: pl.DataFrame | None = None,
     ) -> pl.DataFrame:
         """
-        计算 NT_Buy_Prob v2。
+        计算 NT_Buy_Prob。
+
+        v2 模式: cluster_data=None → 5 因子 sigmoid
+        v3 模式: cluster_data 提供时 → 4 分量 (同指数+主ETF+跨指数+个股)
 
         Parameters
         ----------
         etf_1m : 目标 ETF 1 分钟 K 线 (Polars DataFrame)
         index_1m : 参考指数 1 分钟 K 线
         fleet_etf_data : {etf_symbol: 1m_df} 舰队 ETF 数据，用于共振计算
+        cluster_data : ETFCluster.compute() 返回的 DataFrame (v3)
 
         Returns
         -------
@@ -160,8 +185,11 @@ class NTBuyProb:
             (pl.col("ret_etf") - pl.col("ret_index")).alias("lead_gap"),
         )
 
-        # 6. sigmoid 线性组合
-        df = self._sigmoid_combine(df)
+        # 6. sigmoid 线性组合 (v2 或 v3)
+        if cluster_data is not None and cluster_data.height > 0:
+            df = self._sigmoid_combine_v3(df, cluster_data)
+        else:
+            df = self._sigmoid_combine(df)
 
         return df.select(
             "datetime", "trade_date", "symbol",
@@ -378,6 +406,53 @@ class NTBuyProb:
         return df.with_columns(
             (1.0 / (1.0 + (-logit).exp())).clip(0.0, 1.0).alias("nt_buy_prob"),
         )
+
+    def _sigmoid_combine_v3(
+        self, df: pl.DataFrame, cluster: pl.DataFrame,
+    ) -> pl.DataFrame:
+        """
+        v3 四分量组合:
+          同指数共振 (0.45) + 主 ETF 吸收 (0.25)
+          + 跨指数跟随 (0.20) + 个股传导 (0.10)
+
+        cluster columns: same_index_buy_score, cross_index_follow,
+                         primary_amt_z, cluster_resonance_count
+        """
+        cl = cluster.select(
+            "datetime",
+            "same_index_buy_score",
+            "cross_index_follow",
+            pl.col("cluster_resonance_count").alias("_cl_cnt"),
+        )
+        df = df.join(cl, on="datetime", how="left")
+        df = df.with_columns(
+            pl.col("same_index_buy_score").fill_null(0.0),
+            pl.col("cross_index_follow").fill_null(0.0),
+            pl.col("_cl_cnt").fill_null(0),
+        )
+
+        # 归一化各分量到 ~[0, 1]
+        # same_index_buy_score: 理论 max ~5, / 5
+        # absorption: clip(0, 0.1) / 0.1
+        # cross_index_follow: 已经 0~1
+        # stress_context: 已经 0~1
+        logit = (
+            self.w_same_index
+            * (pl.col("same_index_buy_score").clip(0.0, 5.0) / 5.0)
+            + self.w_main_etf
+            * (pl.col("absorption").clip(0.0, 0.1) / 0.1)
+            + self.w_cross_index
+            * pl.col("cross_index_follow").clip(0.0, 1.0)
+            + self.w_stock_prop
+            * pl.col("stress_context")
+            # cluster_resonance_count 做 bonus
+            + 0.5 * (pl.col("_cl_cnt").cast(pl.Float64) / 5.0).clip(0.0, 1.0)
+            + self.bias_v3
+        )
+        df = df.with_columns(
+            (1.0 / (1.0 + (-logit).exp())).clip(0.0, 1.0).alias("nt_buy_prob"),
+        )
+        return df.drop("same_index_buy_score", "cross_index_follow", "_cl_cnt")
 
     @staticmethod
     def _empty_result() -> pl.DataFrame:
