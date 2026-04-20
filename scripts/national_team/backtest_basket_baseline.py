@@ -1,9 +1,8 @@
-"""
-国家队事件篮子策略基线
+"""国家队事件 300ETF 策略基线
 
 核心逻辑:
   - 信号触发 (prob > threshold)
-  - T1 开盘买入 HS300 全篮子等权 (或权重前 TopN)
+  - T1 开盘买入 300ETF (510300.SH)
   - 固定持有 3 天
   - prob 分层控制仓位 (0% / 30% / 60% / 100%)
 
@@ -26,20 +25,20 @@ import numpy as np
 import polars as pl
 import clickhouse_connect
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from src.data_clients import (
+    create_clickhouse_http_client,
+    query_clickhouse_arrow_df,
+    query_clickhouse_rows,
+)
+from src.data_queries import etf_daily_open_close_sql, trading_dates_sql
 from scripts.backtest_buy_elasticity import (
     detect_signal_dates,
-    get_hs300_members,
-    get_stock_daily_agg,
-    get_adj_factors,
-    sym_local_to_tushare,
-    sym_tushare_to_local,
     SIGNAL_THRESHOLD,
 )
-from src.config import CH_HTTP_KWARGS
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 # ── 仓位分层 ──────────────────────────────────────────────────────────────
 
@@ -64,74 +63,47 @@ def position_size(prob: float) -> float:
 
 
 def get_ch() -> clickhouse_connect.driver.Client:
-    return clickhouse_connect.get_client(**CH_HTTP_KWARGS)
+    return create_clickhouse_http_client()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 
 def get_trading_dates(ch, start_date: date, end_date: date) -> list[date]:
-    r = ch.query(
-        """
-        SELECT DISTINCT trade_date FROM klines_1m_etf
-        WHERE symbol = '510300.SH'
-          AND trade_date BETWEEN %(sd)s AND %(ed)s
-        ORDER BY trade_date
-        """,
-        parameters={"sd": start_date, "ed": end_date},
+    rows = query_clickhouse_rows(
+        trading_dates_sql("klines_1m_etf"),
+        parameters={"sym": "510300.SH", "sd": start_date, "ed": end_date},
+        client=ch,
     )
-    return [row[0] for row in r.result_rows]
+    return [row[0] for row in rows]
 
 
-def get_adj_daily(
-    ch, symbols: list[str], start_date: date, end_date: date,
+# ── Helper: ETF 日线 ──────────────────────────────────────────────────────
+
+
+def get_etf_ohlc(
+    ch, symbol: str, start_date: date, end_date: date,
 ) -> pl.DataFrame:
-    if not symbols:
-        return pl.DataFrame()
-    daily = get_stock_daily_agg(ch, symbols, start_date, end_date)
-    if daily.height == 0:
-        return pl.DataFrame()
-    ts_syms = [sym_local_to_tushare(s) for s in symbols]
-    adj = get_adj_factors(ch, ts_syms, start_date, end_date)
-    if adj.height == 0:
-        daily = daily.with_columns(pl.col("daily_close").alias("adj_close"))
-        return daily
-    adj = adj.with_columns(
-        pl.col("symbol").map_elements(
-            lambda s: sym_tushare_to_local(s), return_dtype=pl.Utf8,
-        ).alias("symbol"),
+    """获取 ETF 日线 OHLC (从分钟线聚合)。"""
+    df = query_clickhouse_arrow_df(
+        etf_daily_open_close_sql(),
+        parameters={"sym": symbol, "sd": start_date, "ed": end_date},
+        client=ch,
     )
-    daily = daily.join(
-        adj.select("symbol", "trade_date", pl.col("factor").alias("adj_factor")),
-        on=["symbol", "trade_date"],
-        how="left",
+    if df.height == 0:
+        return pl.DataFrame(schema={
+            "trade_date": pl.Date, "etf_open": pl.Float64, "etf_close": pl.Float64,
+        })
+    return df.with_columns(
+        pl.col("trade_date").cast(pl.Date),
+        pl.col("etf_open").cast(pl.Float64),
+        pl.col("etf_close").cast(pl.Float64),
     )
-    daily = daily.with_columns(
-        (pl.col("daily_close") * pl.col("adj_factor").fill_null(1.0)).alias("adj_close"),
-    )
-    return daily
-
-
-def get_stock_open_prices(
-    ch, symbols: list[str], trade_date: date,
-) -> pl.DataFrame:
-    if not symbols:
-        return pl.DataFrame()
-    r = ch.query_arrow(
-        """
-        SELECT symbol, argMin(open, datetime) AS day_open
-        FROM klines_1m_stock
-        WHERE trade_date = %(d)s AND symbol IN %(syms)s
-        GROUP BY symbol
-        """,
-        parameters={"d": trade_date, "syms": symbols},
-    )
-    if r.num_rows == 0:
-        return pl.DataFrame(schema={"symbol": pl.Utf8, "day_open": pl.Float64})
-    return pl.from_arrow(r).with_columns(pl.col("day_open").cast(pl.Float64))
 
 
 # ── 单事件回测 ────────────────────────────────────────────────────────────
+
+ETF_SYMBOL = "510300.SH"
 
 
 def run_basket_event(
@@ -139,16 +111,11 @@ def run_basket_event(
     signal_date: date,
     signal_prob: float,
     hold_days: int = HOLD_DAYS,
-    basket_mode: str = "full",  # "full" | "top30" | "top50"
+    basket_mode: str = "full",  # kept for API compat, ignored
 ) -> dict | None:
     """
-    单事件: T1 open 买入 HS300 篮子, 持有 hold_days 天, 按 T_exit close 卖出.
-    Returns event-level stats dict, or None if skipped.
+    单事件: T1 open 买入 300ETF, 持有 hold_days 天, 按 T_exit close 卖出.
     """
-    members = get_hs300_members(ch, signal_date)
-    if not members:
-        return None
-
     # 交易日历
     cal = get_trading_dates(
         ch,
@@ -164,49 +131,29 @@ def run_basket_event(
     t1 = cal[t0_idx + 1]  # T+1 入场日
     t_exit = cal[t0_idx + 1 + hold_days]  # 入场后持有 hold_days 天
 
-    # 获取日线数据 (含复权)
-    daily = get_adj_daily(ch, members, t1 - timedelta(days=5), t_exit + timedelta(days=5))
-    if daily.height == 0:
+    # 获取 ETF 日线
+    etf = get_etf_ohlc(ch, ETF_SYMBOL, t1 - timedelta(days=5), t_exit + timedelta(days=5))
+    if etf.height == 0:
         return None
 
-    # T1 开盘价 (复权)
-    t1_open_raw = get_stock_open_prices(ch, members, t1)
-    t1_adj = daily.filter(pl.col("trade_date") == t1).select(
-        "symbol", pl.col("adj_factor").fill_null(1.0).alias("t1_adj"),
-    )
-    t1_open = (
-        t1_open_raw
-        .join(t1_adj, on="symbol", how="left")
-        .with_columns(
-            (pl.col("day_open") * pl.col("t1_adj").fill_null(1.0)).alias("adj_open"),
-        )
-        .filter(pl.col("adj_open") > 0)
-        .select("symbol", "adj_open")
-    )
-
-    # T_exit 收盘价 (复权)
-    t_exit_close = (
-        daily.filter(pl.col("trade_date") == t_exit)
-        .filter(pl.col("adj_close") > 0)
-        .select("symbol", pl.col("adj_close").alias("exit_close"))
-    )
-
-    # 合并 & 算收益
-    merged = t1_open.join(t_exit_close, on="symbol", how="inner").with_columns(
-        (pl.col("exit_close") / pl.col("adj_open") - 1.0).alias("stock_ret"),
-    )
-
-    if merged.height == 0:
+    # T1 开盘价
+    t1_row = etf.filter(pl.col("trade_date") == t1)
+    if t1_row.height == 0:
+        return None
+    entry_price = float(t1_row["etf_open"][0])
+    if entry_price <= 0:
         return None
 
-    # 篮子模式
-    if basket_mode == "top30":
-        merged = merged.head(30)
-    elif basket_mode == "top50":
-        merged = merged.head(50)
+    # T_exit 收盘价
+    exit_row = etf.filter(pl.col("trade_date") == t_exit)
+    if exit_row.height == 0:
+        return None
+    exit_price = float(exit_row["etf_close"][0])
+    if exit_price <= 0:
+        return None
 
-    # 等权篮子收益
-    basket_ret = float(merged["stock_ret"].mean())
+    # 收益
+    basket_ret = exit_price / entry_price - 1.0
     pos = position_size(signal_prob)
     portfolio_ret = basket_ret * pos
 
@@ -214,12 +161,14 @@ def run_basket_event(
         "signal_date": signal_date,
         "signal_prob": signal_prob,
         "position_size": pos,
-        "n_stocks": merged.height,
+        "n_stocks": 1,
         "basket_ret": basket_ret,
         "portfolio_ret": portfolio_ret,
         "entry_date": t1,
         "exit_date": t_exit,
         "year": signal_date.year,
+        "entry_price": entry_price,
+        "exit_price": exit_price,
     }
 
 
@@ -316,9 +265,9 @@ def format_stats_table(stats_list: list[dict]) -> list[str]:
 
 def generate_report(df: pl.DataFrame, output_path: Path) -> None:
     lines = [
-        "# 国家队事件篮子策略基线报告",
+        "# 国家队事件 300ETF 策略基线报告",
         "",
-        "策略: 信号触发 → T1 开盘买入 HS300 等权篮子 → 持有 3 天 → prob 分层仓位",
+        "策略: 信号触发 → T1 开盘买入 300ETF (510300.SH) → 持有 3 天 → prob 分层仓位",
         "",
         "## 仓位分层规则",
         "",
@@ -396,13 +345,13 @@ def generate_report(df: pl.DataFrame, output_path: Path) -> None:
     # ── 事件明细 (最近 20 个) ─────────────────────────────────────────────
     lines.append("## 事件明细 (最近 20 个)")
     lines.append("")
-    lines.append("| 信号日 | prob | 仓位 | 股数 | basket_ret | portfolio_ret |")
-    lines.append("|--------|------|------|------|-----------|--------------|")
+    lines.append("| 信号日 | prob | 仓位 | ETF收益 | portfolio_ret |")
+    lines.append("|--------|------|------|---------|--------------|")
     recent = df.sort("signal_date", descending=True).head(20)
     for row in recent.sort("signal_date").iter_rows(named=True):
         lines.append(
             f"| {row['signal_date']} | {row['signal_prob']:.0%} "
-            f"| {row['position_size']:.0%} | {row['n_stocks']} "
+            f"| {row['position_size']:.0%} "
             f"| {row['basket_ret']:+.3%} | {row['portfolio_ret']:+.3%} |"
         )
     lines.append("")
@@ -417,8 +366,8 @@ def generate_report(df: pl.DataFrame, output_path: Path) -> None:
 
 def main() -> None:
     print("=" * 70)
-    print("  国家队事件篮子策略基线")
-    print("  T1 开盘 → HS300 等权 → 固定 3 天 → prob 分层仓位")
+    print("  国家队事件 300ETF 策略基线")
+    print("  T1 开盘 → 300ETF (510300.SH) → 固定 3 天 → prob 分层仓位")
     print("=" * 70)
 
     # Step 1: 信号日
@@ -440,7 +389,7 @@ def main() -> None:
         if result is not None:
             rows.append(result)
             print(f"  [{i+1}/{len(signals)}] {sig_date} prob={prob:.1%} pos={pos:.0%} "
-                  f"n={result['n_stocks']} basket={result['basket_ret']:+.3%} "
+                  f"etf={result['basket_ret']:+.3%} "
                   f"port={result['portfolio_ret']:+.3%}")
         else:
             print(f"  [{i+1}/{len(signals)}] {sig_date} prob={prob:.1%} → skip")

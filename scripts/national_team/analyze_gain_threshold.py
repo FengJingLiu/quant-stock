@@ -21,10 +21,18 @@ from pathlib import Path
 import polars as pl
 import clickhouse_connect
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from src.data_clients import (
+    create_clickhouse_http_client,
+    query_clickhouse_arrow_df,
+)
+from src.data_queries import (
+    stock_daily_close_sql,
+    stock_qfq_adj_factor_sql,
+    trading_dates_sql,
+)
 from src.national_team.elastic_scorer import ElasticScorer
-from src.config import CH_HTTP_KWARGS
 from scripts.backtest_buy_elasticity import (
     detect_signal_dates,
     get_hs300_members,
@@ -38,22 +46,18 @@ THRESHOLDS = [0.10, 0.20, 0.30]  # 收益门槛
 
 
 def get_ch() -> clickhouse_connect.driver.Client:
-    return clickhouse_connect.get_client(**CH_HTTP_KWARGS)
+    return create_clickhouse_http_client()
 
 
 def get_trading_dates(ch, start: date, end: date) -> list[date]:
-    r = ch.query_arrow(
-        """
-        SELECT DISTINCT trade_date FROM klines_1m_index
-        WHERE symbol = '000300'
-          AND trade_date BETWEEN %(sd)s AND %(ed)s
-        ORDER BY trade_date
-        """,
-        parameters={"sd": start, "ed": end},
+    df = query_clickhouse_arrow_df(
+        trading_dates_sql("klines_1m_index"),
+        parameters={"sym": "000300", "sd": start, "ed": end},
+        client=ch,
     )
-    if r.num_rows == 0:
+    if df.height == 0:
         return []
-    return pl.from_arrow(r).with_columns(
+    return df.with_columns(
         pl.col("trade_date").cast(pl.Date),
     )["trade_date"].to_list()
 
@@ -62,41 +66,28 @@ def get_stock_adj_daily(
     ch, symbols: list[str], start: date, end: date,
 ) -> pl.DataFrame:
     """获取个股日线 + 前复权收盘价。"""
-    r = ch.query_arrow(
-        """
-        SELECT symbol, trade_date,
-               argMax(close, datetime) as daily_close
-        FROM klines_1m_stock
-        WHERE trade_date BETWEEN %(sd)s AND %(ed)s
-          AND symbol IN %(syms)s
-        GROUP BY symbol, trade_date
-        ORDER BY symbol, trade_date
-        """,
+    daily = query_clickhouse_arrow_df(
+        stock_daily_close_sql(),
         parameters={"sd": start, "ed": end, "syms": symbols},
+        client=ch,
     )
-    if r.num_rows == 0:
+    if daily.height == 0:
         return pl.DataFrame()
-
-    daily = pl.from_arrow(r).with_columns(
+    daily = daily.with_columns(
         pl.col("trade_date").cast(pl.Date),
         pl.col("daily_close").cast(pl.Float64),
     )
 
     # 前复权因子
     ts_symbols = [f"{s[2:]}.{s[:2].upper()}" for s in symbols]
-    adj_r = ch.query_arrow(
-        """
-        SELECT symbol as ts_sym, trade_date, factor
-        FROM adj_factor
-        WHERE adj_type = 'qfq' AND fund_type = 'stock'
-          AND trade_date BETWEEN %(sd)s AND %(ed)s
-          AND symbol IN %(syms)s
-        """,
+    adj_df = query_clickhouse_arrow_df(
+        stock_qfq_adj_factor_sql("ts_sym"),
         parameters={"sd": start, "ed": end, "syms": ts_symbols},
+        client=ch,
     )
 
-    if adj_r.num_rows > 0:
-        adj_df = pl.from_arrow(adj_r).with_columns(
+    if adj_df.height > 0:
+        adj_df = adj_df.with_columns(
             pl.col("trade_date").cast(pl.Date),
             pl.col("factor").cast(pl.Float64),
             pl.col("ts_sym").map_elements(
@@ -414,7 +405,7 @@ def main() -> None:
                 report_lines.append(f"| T+{d} | {n} | {pct:.1%} | {cum_pct:.1%} |")
 
     # 保存报告
-    root = Path(__file__).resolve().parent.parent
+    root = Path(__file__).resolve().parents[2]
     report_path = root / "doc" / "gain_threshold_report.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text("\n".join(report_lines), encoding="utf-8")

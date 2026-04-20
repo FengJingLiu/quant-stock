@@ -5,15 +5,20 @@ import argparse
 import json
 import math
 import os
+import sys
 from pathlib import Path
 
 import akshare as ak
-import akshare_proxy_patch
 import duckdb
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from akquant import ExecutionMode, Strategy, run_backtest
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from src.data_clients import ensure_akshare_proxy_patch
 
 
 PROXY_HOST = os.environ["AKSHARE_PROXY_HOST"]
@@ -50,7 +55,7 @@ def to_ts(value):
 
 
 def ensure_proxy():
-    akshare_proxy_patch.install_patch(PROXY_HOST, PROXY_TOKEN, retry=30)
+    ensure_akshare_proxy_patch(proxy_host=PROXY_HOST, token=PROXY_TOKEN, retry=30)
 
 
 def ensure_dirs(base_dir):

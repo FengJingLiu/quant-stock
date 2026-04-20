@@ -70,3 +70,4 @@ TUSHARE_API_URL = _get("TUSHARE_API_URL", "http://api.tushare.pro")
 # ── AKShare Proxy ──────────────────────────────────────────────────────
 AKSHARE_PROXY_HOST = _require("AKSHARE_PROXY_HOST")
 AKSHARE_PROXY_TOKEN = _require("AKSHARE_PROXY_TOKEN")
+AKSHARE_PROXY_RETRY = int(_get("AKSHARE_PROXY_RETRY", "30"))

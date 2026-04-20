@@ -13,14 +13,19 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
 import akshare as ak
-import akshare_proxy_patch
 import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from src.data_clients import ensure_akshare_proxy_patch
 
 DEFAULT_OUTPUT = Path("data/stock_filter_ma120.csv")
 CACHE_DIR = Path("data/cache")
@@ -44,7 +49,7 @@ def retry(func: Callable[[], Any], tries: int, base_sleep: float) -> Any:
 
 
 def install_proxy_patch() -> None:
-    akshare_proxy_patch.install_patch(PROXY_HOST, TOKEN, retry=30)
+    ensure_akshare_proxy_patch(proxy_host=PROXY_HOST, token=TOKEN, retry=30)
     print(f"[INFO] 已启用 akshare-proxy-patch: host={PROXY_HOST}")
 
 

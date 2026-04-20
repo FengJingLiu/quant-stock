@@ -25,8 +25,9 @@ from pathlib import Path
 import polars as pl
 import clickhouse_connect
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from src.data_clients import create_clickhouse_http_client
 from src.national_team.elastic_scorer import ElasticScorer
 from src.national_team.portfolio_builder import PortfolioBuilder
 from src.national_team.exit_engine import ExitEngine, ExitRule, Trade
@@ -39,7 +40,6 @@ from scripts.backtest_buy_elasticity import (
     sym_tushare_to_local,
     SIGNAL_THRESHOLD,
 )
-from src.config import CH_HTTP_KWARGS
 
 # ── 配置 ──────────────────────────────────────────────────────────────────
 
@@ -75,7 +75,7 @@ EXPERIMENT_GRID: list[RunConfig] = [
 
 
 def get_ch() -> clickhouse_connect.driver.Client:
-    return clickhouse_connect.get_client(**CH_HTTP_KWARGS)
+    return create_clickhouse_http_client()
 
 
 # ── 单事件回测 ────────────────────────────────────────────────────────────
@@ -394,7 +394,7 @@ def main() -> None:
     all_trades_df = compile_trade_records(all_trades, default_config.label)
 
     # 保存交易明细
-    root = Path(__file__).resolve().parent.parent
+    root = Path(__file__).resolve().parents[2]
     if all_trades_df.height > 0:
         parquet_path = root / "data" / "event_portfolio_trades.parquet"
         parquet_path.parent.mkdir(parents=True, exist_ok=True)

@@ -37,3 +37,4 @@ package-lock.json
 # ── 杂项 ──────────────────────────────────
 akquant_examples/
 BaiduPCS-Go_export_*.txt
+.omx/

@@ -23,6 +23,13 @@ from datetime import date, timedelta
 import clickhouse_connect
 import polars as pl
 
+from src.data_clients import query_clickhouse_arrow_df
+from src.data_queries import (
+    index_daily_open_close_sql,
+    latest_index_weights_sql,
+    stock_daily_agg_sql,
+)
+
 
 @dataclass
 class ElasticScorer:
@@ -240,25 +247,14 @@ class ElasticScorer:
         end_date: date,
     ) -> pl.DataFrame:
         """从 klines_1m_stock 聚合日线。"""
-        r = ch.query_arrow(
-            """
-            SELECT symbol, trade_date,
-                   argMin(open, datetime) as daily_open,
-                   max(high) as daily_high,
-                   min(low) as daily_low,
-                   argMax(close, datetime) as daily_close,
-                   sum(amount) as daily_amount
-            FROM klines_1m_stock
-            WHERE trade_date BETWEEN %(sd)s AND %(ed)s
-              AND symbol IN %(syms)s
-            GROUP BY symbol, trade_date
-            ORDER BY symbol, trade_date
-            """,
+        df = query_clickhouse_arrow_df(
+            stock_daily_agg_sql(),
             parameters={"sd": start_date, "ed": end_date, "syms": symbols},
+            client=ch,
         )
-        if r.num_rows == 0:
+        if df.height == 0:
             return pl.DataFrame()
-        return pl.from_arrow(r).with_columns(
+        return df.with_columns(
             pl.col("trade_date").cast(pl.Date),
             pl.col("daily_open").cast(pl.Float64),
             pl.col("daily_high").cast(pl.Float64),
@@ -274,26 +270,18 @@ class ElasticScorer:
         signal_date: date,
     ) -> float:
         """获取事件日指数日收益率。"""
-        r = ch.query_arrow(
-            """
-            SELECT trade_date,
-                   argMin(open, datetime) as d_open,
-                   argMax(close, datetime) as d_close
-            FROM klines_1m_index
-            WHERE symbol = %(sym)s
-              AND trade_date BETWEEN %(sd)s AND %(ed)s
-            GROUP BY trade_date
-            ORDER BY trade_date
-            """,
+        df = query_clickhouse_arrow_df(
+            index_daily_open_close_sql(),
             parameters={
                 "sym": index_symbol,
                 "sd": signal_date - timedelta(days=5),
                 "ed": signal_date,
             },
+            client=ch,
         )
-        if r.num_rows == 0:
+        if df.height == 0:
             return 0.0
-        df = pl.from_arrow(r).with_columns(
+        df = df.with_columns(
             pl.col("trade_date").cast(pl.Date),
         ).sort("trade_date")
         if df.height < 2:
@@ -343,21 +331,14 @@ class ElasticScorer:
         signal_date: date,
     ) -> pl.DataFrame:
         """获取最近一期指数权重，映射到 klines_1m_stock 格式。"""
-        r = ch.query_arrow(
-            """
-            SELECT con_code, weight FROM dim_index_weights
-            WHERE index_code = '399300.SZ'
-              AND trade_date = (
-                  SELECT max(trade_date) FROM dim_index_weights
-                  WHERE index_code = '399300.SZ' AND trade_date <= %(d)s
-              )
-            """,
-            parameters={"d": signal_date},
+        df = query_clickhouse_arrow_df(
+            latest_index_weights_sql(),
+            parameters={"idx": "399300.SZ", "d": signal_date},
+            client=ch,
         )
-        if r.num_rows == 0:
+        if df.height == 0:
             return pl.DataFrame({"symbol": [], "weight": []},
                                 schema={"symbol": pl.Utf8, "weight": pl.Float64})
-        df = pl.from_arrow(r)
         # con_code (600519.SH) → klines symbol (sh600519)
         return df.with_columns(
             pl.col("con_code").map_elements(

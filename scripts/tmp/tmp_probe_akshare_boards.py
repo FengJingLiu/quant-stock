@@ -2,15 +2,25 @@
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 import akshare as ak
-import akshare_proxy_patch
 
 import _load_env  # noqa: F401
 
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from src.data_clients import ensure_akshare_proxy_patch
+
 
 def main() -> None:
-    akshare_proxy_patch.install_patch(os.environ["AKSHARE_PROXY_HOST"], os.environ["AKSHARE_PROXY_TOKEN"], retry=30)
+    ensure_akshare_proxy_patch(
+        proxy_host=os.environ["AKSHARE_PROXY_HOST"],
+        token=os.environ["AKSHARE_PROXY_TOKEN"],
+        retry=30,
+    )
 
     names = ak.stock_board_industry_name_em()
     print("[board_names] rows=", 0 if names is None else len(names))

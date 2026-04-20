@@ -13,16 +13,24 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from datetime import date, timedelta
 from pathlib import Path
 
 import polars as pl
-import clickhouse_connect
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from src.data_clients import (
+    create_clickhouse_http_client,
+    query_clickhouse_arrow_df,
+    query_clickhouse_rows,
+)
+from src.data_queries import (
+    latest_index_members_sql,
+    stock_daily_agg_sql,
+    stock_qfq_adj_factor_sql,
+)
 from src.national_team.ch_client import get_etf_1m, get_index_1m
 from src.national_team.nt_buy_prob import NTBuyProb
 
@@ -44,12 +52,8 @@ FORWARD_WINDOWS = [1, 3, 5, 10, 20]
 # 每日取最强 N 只展示
 TOP_N = 20
 
-# ClickHouse 连接
-CH_KWARGS = dict(host="localhost", port=8123, username="default", password=os.environ["CH_PASSWORD"], database="astock")
-
-
-def get_ch() -> clickhouse_connect.driver.Client:
-    return clickhouse_connect.get_client(**CH_KWARGS)
+def get_ch():
+    return create_clickhouse_http_client()
 
 
 def sym_tushare_to_local(con_code: str) -> str:
@@ -65,18 +69,12 @@ def sym_local_to_tushare(sym: str) -> str:
 
 def get_hs300_members(ch, signal_date: date) -> list[str]:
     """获取最近一期沪深300成分股名单（返回 klines_1m_stock 格式的 symbol 列表）。"""
-    r = ch.query(
-        """
-        SELECT con_code FROM dim_index_weights
-        WHERE index_code = %(idx)s
-          AND trade_date = (
-              SELECT max(trade_date) FROM dim_index_weights
-              WHERE index_code = %(idx)s AND trade_date <= %(d)s
-          )
-        """,
+    rows = query_clickhouse_rows(
+        latest_index_members_sql(),
         parameters={"idx": INDEX_WEIGHT_CODE, "d": signal_date},
+        client=ch,
     )
-    return [sym_tushare_to_local(row[0]) for row in r.result_rows]
+    return [sym_tushare_to_local(row[0]) for row in rows]
 
 
 def get_stock_daily_agg(ch, symbols: list[str], start_date: date, end_date: date) -> pl.DataFrame:
@@ -88,25 +86,13 @@ def get_stock_daily_agg(ch, symbols: list[str], start_date: date, end_date: date
     if not symbols:
         return pl.DataFrame()
 
-    r = ch.query_arrow(
-        """
-        SELECT symbol, trade_date,
-               argMin(open, datetime) as daily_open,
-               max(high) as daily_high,
-               min(low) as daily_low,
-               argMax(close, datetime) as daily_close,
-               sum(amount) as daily_amount
-        FROM klines_1m_stock
-        WHERE trade_date BETWEEN %(sd)s AND %(ed)s
-          AND symbol IN %(syms)s
-        GROUP BY symbol, trade_date
-        ORDER BY symbol, trade_date
-        """,
+    df = query_clickhouse_arrow_df(
+        stock_daily_agg_sql(),
         parameters={"sd": start_date, "ed": end_date, "syms": symbols},
+        client=ch,
     )
-    if r.num_rows == 0:
+    if df.height == 0:
         return pl.DataFrame()
-    df = pl.from_arrow(r)
     return df.with_columns(
         pl.col("trade_date").cast(pl.Date),
         pl.col("daily_open").cast(pl.Float64),
@@ -122,21 +108,13 @@ def get_adj_factors(ch, symbols_tushare: list[str], start_date: date, end_date: 
     if not symbols_tushare:
         return pl.DataFrame()
 
-    r = ch.query_arrow(
-        """
-        SELECT symbol, trade_date, factor
-        FROM adj_factor
-        WHERE adj_type = 'qfq'
-          AND fund_type = 'stock'
-          AND trade_date BETWEEN %(sd)s AND %(ed)s
-          AND symbol IN %(syms)s
-        ORDER BY symbol, trade_date
-        """,
+    df = query_clickhouse_arrow_df(
+        stock_qfq_adj_factor_sql(),
         parameters={"sd": start_date, "ed": end_date, "syms": symbols_tushare},
+        client=ch,
     )
-    if r.num_rows == 0:
+    if df.height == 0:
         return pl.DataFrame()
-    df = pl.from_arrow(r)
     return df.with_columns(
         pl.col("trade_date").cast(pl.Date),
         pl.col("factor").cast(pl.Float64),
@@ -478,7 +456,7 @@ def main() -> None:
 
     # 写入
     report_text = "\n".join(report) + "\n"
-    out_path = Path(__file__).resolve().parent.parent / "doc" / "nt_buy_elasticity_report.md"
+    out_path = Path(__file__).resolve().parents[2] / "doc" / "nt_buy_elasticity_report.md"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(report_text, encoding="utf-8")
     print(f"\n报告已写入: {out_path}")

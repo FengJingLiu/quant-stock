@@ -19,11 +19,15 @@ ClickHouse 数据访问层 — astock 数据库 1分钟K线查询 (Polars + clic
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
-import clickhouse_connect
 import polars as pl
 
-from src.config import CH_HTTP_KWARGS as _DEFAULT_CH
+from src.data_clients import (
+    create_clickhouse_http_client,
+    query_clickhouse_arrow_df,
+)
+from src.data_queries import trading_dates_sql
 
 KLINES_SCHEMA = {
     "symbol": pl.Utf8,
@@ -39,9 +43,8 @@ KLINES_SCHEMA = {
 }
 
 
-def _get_client(ch_kwargs: dict | None = None) -> clickhouse_connect.driver.Client:
-    kw = {**_DEFAULT_CH, **(ch_kwargs or {})}
-    return clickhouse_connect.get_client(**kw)
+def _get_client(ch_kwargs: dict | None = None) -> Any:
+    return create_clickhouse_http_client(ch_kwargs)
 
 
 def _query_arrow_df(
@@ -55,12 +58,11 @@ def _query_arrow_df(
     使用 clickhouse-connect 的 query_arrow 接口，
     数据在 Rust/C++ 层面直接从 Arrow 列式格式映射到 Polars，无逐行拷贝。
     """
-    client = _get_client(ch_kwargs)
-    arrow_tbl = client.query_arrow(sql, parameters=parameters or {})
-    if arrow_tbl.num_rows == 0:
-        columns = [f.name for f in arrow_tbl.schema]
-        return pl.DataFrame(schema={c: pl.Utf8 for c in columns})
-    return pl.from_arrow(arrow_tbl)
+    return query_clickhouse_arrow_df(
+        sql,
+        parameters=parameters,
+        client_overrides=ch_kwargs,
+    )
 
 
 def _cast_klines(df: pl.DataFrame) -> pl.DataFrame:
@@ -167,15 +169,8 @@ def get_trading_dates(
     ch_kwargs: dict | None = None,
 ) -> list[date]:
     """通过指数表获取交易日历。"""
-    sql = (
-        "SELECT DISTINCT trade_date"
-        "  FROM klines_1m_index"
-        " WHERE symbol = {sym:String}"
-        "   AND trade_date BETWEEN {sd:Date} AND {ed:Date}"
-        " ORDER BY trade_date"
-    )
     df = _query_arrow_df(
-        sql,
+        trading_dates_sql("klines_1m_index"),
         parameters={"sym": "000300", "sd": str(start_date), "ed": str(end_date)},
         ch_kwargs=ch_kwargs,
     )

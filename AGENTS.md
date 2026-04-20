@@ -8,6 +8,9 @@ akshare_proxy_patch.install_patch(PROXY_HOST, TOKEN, retry=30)
 ```
 3 使用 .venv/ python 环境
 4 临时查询代码都保存到 scripts/
+5 AKShare / Tushare / ClickHouse 的公共入口统一放在 `src/data_clients.py`，重复 SQL 模板统一放在 `src/data_queries.py`：AKShare 使用 `ensure_akshare_proxy_patch()` / `get_akshare()`，Tushare 使用 `get_tushare_pro()`，ClickHouse 使用 `create_clickhouse_http_client()` / `query_clickhouse_arrow_df()` / `query_clickhouse_rows()`；新增脚本不要重复写直连、patch 和重复 SQL。
+6 回测任务优先使用向量化框架加速：默认优先 `polars + vectorbt` 方案；仅在确有必要（例如成交撮合细节无法向量化）时才使用逐笔事件循环回测。
+7 `src` 下每个策略子目录，必须在 `scripts` 下建立同名子目录；该策略的运行脚本统一放到对应 `scripts/<strategy_subdir>/` 中。
 
 You are an expert quantitative developer using the **AKQuant** framework (a high-performance Python/Rust backtesting engine).
 Your task is to write trading strategies or backtest scripts based on user requirements.

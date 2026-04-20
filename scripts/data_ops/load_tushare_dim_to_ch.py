@@ -17,33 +17,22 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import time
 from datetime import date, datetime
 from pathlib import Path
 
-import clickhouse_connect
 import pandas as pd
 
 # ── 项目路径 ──────────────────────────────────────────────────
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from src.national_team.ts_client import get_pro
-
-# ── ClickHouse 连接 ──────────────────────────────────────────
-CH_CONFIG = dict(
-    host="localhost",
-    port=8123,
-    username="default",
-    password=os.environ["CH_PASSWORD"],
-    database="astock",
-)
+from src.data_clients import create_clickhouse_http_client, get_tushare_pro
 
 
 def get_ch():
-    return clickhouse_connect.get_client(**CH_CONFIG)
+    return create_clickhouse_http_client()
 
 
 # ── 工具函数 ──────────────────────────────────────────────────
@@ -107,7 +96,7 @@ def _derive_exchange(ts_code: str) -> str:
 def load_stock_info():
     print("=" * 60)
     print("[1/5] dim_stock_info — 股票基础信息")
-    pro = get_pro()
+    pro = get_tushare_pro()
     ch = get_ch()
 
     ch.command(DDL_STOCK_INFO)
@@ -163,7 +152,7 @@ ORDER BY (ts_code, start_date)
 def load_namechange():
     print("=" * 60)
     print("[2/5] dim_namechange — 股票更名/ST历史")
-    pro = get_pro()
+    pro = get_tushare_pro()
     ch = get_ch()
 
     ch.command(DDL_NAMECHANGE)
@@ -221,7 +210,7 @@ ORDER BY (trade_date, ts_code)
 def load_suspend_daily(start_year: int = 2010):
     print("=" * 60)
     print("[3/5] dim_suspend_daily — 停牌记录")
-    pro = get_pro()
+    pro = get_tushare_pro()
     ch = get_ch()
 
     ch.command(DDL_SUSPEND)
@@ -283,7 +272,7 @@ def load_stk_limit_daily(start_year: int = 2010):
     print("=" * 60)
     print("[4/5] dim_stk_limit_daily — 涨跌停价")
     print(f"  范围: {start_year}-01-01 ~ today (每日~7500行，预计较慢)")
-    pro = get_pro()
+    pro = get_tushare_pro()
     ch = get_ch()
 
     ch.command(DDL_STK_LIMIT)
@@ -361,7 +350,7 @@ TARGET_INDICES = [
 def load_index_weights(start_year: int = 2005):
     print("=" * 60)
     print("[5/5] dim_index_weights — 指数成分权重")
-    pro = get_pro()
+    pro = get_tushare_pro()
     ch = get_ch()
 
     ch.command(DDL_INDEX_WEIGHTS)

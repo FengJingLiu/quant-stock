@@ -14,16 +14,21 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
 import akshare as ak
-import akshare_proxy_patch
 import duckdb
 import numpy as np
 import pandas as pd
 from akquant import Strategy, run_backtest
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from src.data_clients import ensure_akshare_proxy_patch
 
 
 @dataclass(frozen=True)
@@ -339,7 +344,11 @@ def fetch_hs300_from_local(
 def fetch_hs300_from_akshare(
     start_date: pd.Timestamp, end_date: pd.Timestamp
 ) -> pd.Series:
-    akshare_proxy_patch.install_patch(os.environ["AKSHARE_PROXY_HOST"], os.environ["AKSHARE_PROXY_TOKEN"], retry=30)
+    ensure_akshare_proxy_patch(
+        proxy_host=os.environ["AKSHARE_PROXY_HOST"],
+        token=os.environ["AKSHARE_PROXY_TOKEN"],
+        retry=30,
+    )
     df = cast(pd.DataFrame, ak.stock_zh_index_daily_em(symbol="sh000300"))
     if df is None or df.empty:
         raise RuntimeError("AkShare returned empty data for sh000300")

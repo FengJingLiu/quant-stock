@@ -27,8 +27,18 @@ from pathlib import Path
 import polars as pl
 import clickhouse_connect
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from src.data_clients import (
+    create_clickhouse_http_client,
+    query_clickhouse_arrow_df,
+    query_clickhouse_rows,
+)
+from src.data_queries import (
+    etf_daily_open_close_sql,
+    latest_index_members_sql,
+    trading_dates_sql,
+)
 from scripts.backtest_buy_elasticity import (
     detect_signal_dates,
     get_hs300_members,
@@ -38,15 +48,14 @@ from scripts.backtest_buy_elasticity import (
     sym_tushare_to_local,
     SIGNAL_THRESHOLD,
 )
-from src.config import CH_HTTP_KWARGS
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 # ── CH Client ────────────────────────────────────────────────────────────
 
 
 def get_ch() -> clickhouse_connect.driver.Client:
-    return clickhouse_connect.get_client(**CH_HTTP_KWARGS)
+    return create_clickhouse_http_client()
 
 
 # ── Helper: 获取指数成分股 ────────────────────────────────────────────────
@@ -54,18 +63,12 @@ def get_ch() -> clickhouse_connect.driver.Client:
 
 def get_index_members(ch, index_code: str, signal_date: date) -> list[str]:
     """获取指定指数最近一期成分股 (返回 klines_1m_stock 格式)。"""
-    r = ch.query(
-        """
-        SELECT con_code FROM dim_index_weights
-        WHERE index_code = %(idx)s
-          AND trade_date = (
-              SELECT max(trade_date) FROM dim_index_weights
-              WHERE index_code = %(idx)s AND trade_date <= %(d)s
-          )
-        """,
+    rows = query_clickhouse_rows(
+        latest_index_members_sql(),
         parameters={"idx": index_code, "d": signal_date},
+        client=ch,
     )
-    return [sym_tushare_to_local(row[0]) for row in r.result_rows]
+    return [sym_tushare_to_local(row[0]) for row in rows]
 
 
 # ── Helper: 获取带前复权的日线 ────────────────────────────────────────────
@@ -109,23 +112,14 @@ def get_adj_daily(
 
 def get_etf_daily_bench(ch, start_date: date, end_date: date) -> pl.DataFrame:
     """ETF 510300 日线。"""
-    r = ch.query_arrow(
-        """
-        SELECT trade_date,
-               argMin(open, datetime) AS etf_open,
-               argMax(close, datetime) AS etf_close,
-               sum(amount) AS etf_amount
-        FROM klines_1m_etf
-        WHERE symbol = '510300.SH'
-          AND trade_date BETWEEN %(sd)s AND %(ed)s
-        GROUP BY trade_date
-        ORDER BY trade_date
-        """,
-        parameters={"sd": start_date, "ed": end_date},
+    df = query_clickhouse_arrow_df(
+        etf_daily_open_close_sql(include_amount=True),
+        parameters={"sym": "510300.SH", "sd": start_date, "ed": end_date},
+        client=ch,
     )
-    if r.num_rows == 0:
+    if df.height == 0:
         return pl.DataFrame()
-    return pl.from_arrow(r).with_columns(
+    return df.with_columns(
         pl.col("trade_date").cast(pl.Date),
         pl.col("etf_open").cast(pl.Float64),
         pl.col("etf_close").cast(pl.Float64),
@@ -136,16 +130,12 @@ def get_etf_daily_bench(ch, start_date: date, end_date: date) -> pl.DataFrame:
 
 
 def get_trading_dates(ch, start_date: date, end_date: date) -> list[date]:
-    r = ch.query(
-        """
-        SELECT DISTINCT trade_date FROM klines_1m_etf
-        WHERE symbol = '510300.SH'
-          AND trade_date BETWEEN %(sd)s AND %(ed)s
-        ORDER BY trade_date
-        """,
-        parameters={"sd": start_date, "ed": end_date},
+    rows = query_clickhouse_rows(
+        trading_dates_sql("klines_1m_etf"),
+        parameters={"sym": "510300.SH", "sd": start_date, "ed": end_date},
+        client=ch,
     )
-    return [row[0] for row in r.result_rows]
+    return [row[0] for row in rows]
 
 
 # ── Helper: 尾盘价格 (最后 30 分钟 VWAP) ────────────────────────────────

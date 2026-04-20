@@ -5,13 +5,18 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 import akshare as ak
-import akshare_proxy_patch
 import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from src.data_clients import ensure_akshare_proxy_patch
 
 DEFAULT_OUTPUT = Path("data/bank_pe_dividend_list_akshare_proxy.csv")
 
@@ -35,7 +40,7 @@ def install_proxy_patch(proxy_host: str, token: str, proxy_retry: int) -> None:
     if not token:
         raise ValueError("未提供 token，请通过 --token 或环境变量 AKSHARE_PROXY_TOKEN 设置")
 
-    akshare_proxy_patch.install_patch(proxy_host, token, retry=proxy_retry)
+    ensure_akshare_proxy_patch(proxy_host=proxy_host, token=token, retry=proxy_retry)
     print(f"[INFO] 已启用 akshare-proxy-patch: host={proxy_host}, retry={proxy_retry}")
 
 

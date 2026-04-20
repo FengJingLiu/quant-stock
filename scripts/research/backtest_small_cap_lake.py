@@ -16,15 +16,20 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Iterable
 
 import akshare as ak
-import akshare_proxy_patch
 import duckdb
 import pandas as pd
 from akquant import ExecutionMode, Strategy, run_backtest
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from src.data_clients import ensure_akshare_proxy_patch
 
 
 PROXY_HOST = os.environ["AKSHARE_PROXY_HOST"]
@@ -223,7 +228,7 @@ def save_cached_series(path: Path, series: pd.Series) -> None:
 
 
 def ensure_proxy() -> None:
-    akshare_proxy_patch.install_patch(PROXY_HOST, PROXY_TOKEN, retry=30)
+    ensure_akshare_proxy_patch(proxy_host=PROXY_HOST, token=PROXY_TOKEN, retry=30)
 
 
 def estimate_announcement_date(report_period: object) -> pd.Timestamp:

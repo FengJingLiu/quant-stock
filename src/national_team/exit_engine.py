@@ -25,6 +25,14 @@ from typing import NamedTuple
 import clickhouse_connect
 import polars as pl
 
+from src.data_clients import query_clickhouse_arrow_df
+from src.data_queries import (
+    etf_daily_close_sql,
+    stock_daily_close_sql,
+    stock_qfq_adj_factor_sql,
+    trading_dates_sql,
+)
+
 
 class ExitRule(Enum):
     FIXED_3 = "fixed_3"
@@ -235,18 +243,14 @@ class ExitEngine:
     def _get_trading_dates(
         self, ch: clickhouse_connect.driver.Client, start: date, end: date,
     ) -> list[date]:
-        r = ch.query_arrow(
-            """
-            SELECT DISTINCT trade_date FROM klines_1m_index
-            WHERE symbol = '000300'
-              AND trade_date BETWEEN %(sd)s AND %(ed)s
-            ORDER BY trade_date
-            """,
-            parameters={"sd": start, "ed": end},
+        df = query_clickhouse_arrow_df(
+            trading_dates_sql("klines_1m_index"),
+            parameters={"sym": "000300", "sd": start, "ed": end},
+            client=ch,
         )
-        if r.num_rows == 0:
+        if df.height == 0:
             return []
-        return pl.from_arrow(r).with_columns(
+        return df.with_columns(
             pl.col("trade_date").cast(pl.Date),
         )["trade_date"].to_list()
 
@@ -258,41 +262,28 @@ class ExitEngine:
         end: date,
     ) -> pl.DataFrame:
         """获取个股日线 + 前复权收盘价。"""
-        r = ch.query_arrow(
-            """
-            SELECT symbol, trade_date,
-                   argMax(close, datetime) as daily_close
-            FROM klines_1m_stock
-            WHERE trade_date BETWEEN %(sd)s AND %(ed)s
-              AND symbol IN %(syms)s
-            GROUP BY symbol, trade_date
-            ORDER BY symbol, trade_date
-            """,
+        daily = query_clickhouse_arrow_df(
+            stock_daily_close_sql(),
             parameters={"sd": start, "ed": end, "syms": symbols},
+            client=ch,
         )
-        if r.num_rows == 0:
+        if daily.height == 0:
             return pl.DataFrame()
-
-        daily = pl.from_arrow(r).with_columns(
+        daily = daily.with_columns(
             pl.col("trade_date").cast(pl.Date),
             pl.col("daily_close").cast(pl.Float64),
         )
 
         # 获取前复权因子
         ts_symbols = [f"{s[2:]}.{s[:2].upper()}" for s in symbols]
-        adj_r = ch.query_arrow(
-            """
-            SELECT symbol as ts_sym, trade_date, factor
-            FROM adj_factor
-            WHERE adj_type = 'qfq' AND fund_type = 'stock'
-              AND trade_date BETWEEN %(sd)s AND %(ed)s
-              AND symbol IN %(syms)s
-            """,
+        adj_df = query_clickhouse_arrow_df(
+            stock_qfq_adj_factor_sql("ts_sym"),
             parameters={"sd": start, "ed": end, "syms": ts_symbols},
+            client=ch,
         )
 
-        if adj_r.num_rows > 0:
-            adj_df = pl.from_arrow(adj_r).with_columns(
+        if adj_df.height > 0:
+            adj_df = adj_df.with_columns(
                 pl.col("trade_date").cast(pl.Date),
                 pl.col("factor").cast(pl.Float64),
                 # ts_sym -> local symbol
@@ -318,21 +309,14 @@ class ExitEngine:
         self, ch: clickhouse_connect.driver.Client, start: date, end: date,
     ) -> pl.DataFrame:
         """获取 510300 ETF 日线。"""
-        r = ch.query_arrow(
-            """
-            SELECT trade_date,
-                   argMax(close, datetime) as etf_close
-            FROM klines_1m_etf
-            WHERE symbol = '510300.SH'
-              AND trade_date BETWEEN %(sd)s AND %(ed)s
-            GROUP BY trade_date
-            ORDER BY trade_date
-            """,
-            parameters={"sd": start, "ed": end},
+        df = query_clickhouse_arrow_df(
+            etf_daily_close_sql(),
+            parameters={"sym": "510300.SH", "sd": start, "ed": end},
+            client=ch,
         )
-        if r.num_rows == 0:
+        if df.height == 0:
             return pl.DataFrame()
-        return pl.from_arrow(r).with_columns(
+        return df.with_columns(
             pl.col("trade_date").cast(pl.Date),
             pl.col("etf_close").cast(pl.Float64),
         )

@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, Callable, cast
 
 import akshare as ak
-import akshare_proxy_patch
 import duckdb
 import numpy as np
 import pandas as pd
@@ -19,6 +18,7 @@ METAL_BOARD_CODE = "BK0478"
 METAL_BOARD_NAME = "有色金属"
 OTHER_BOARD_KEYWORDS_DEFAULT = ("科技", "消费", "化工")
 from src.config import AKSHARE_PROXY_HOST as DEFAULT_AKSHARE_PROXY_HOST
+from src.data_clients import ensure_akshare_proxy_patch
 from src.config import AKSHARE_PROXY_TOKEN as DEFAULT_AKSHARE_PROXY_TOKEN
 SLEEVE_WEIGHTS = {"bank": 0.50, "metal": 0.25, "other": 0.25}
 BANK_REBALANCE_DIVIDEND_FLOOR = 5.0
@@ -437,7 +437,11 @@ def load_board_universes(
     if not token:
         raise ValueError("akshare token is required for board constituent queries")
 
-    akshare_proxy_patch.install_patch(proxy_host, token, retry=max(1, int(proxy_retry)))
+    ensure_akshare_proxy_patch(
+        proxy_host=proxy_host,
+        token=token,
+        retry=max(1, int(proxy_retry)),
+    )
 
     board_names = retry_call(
         lambda: ak.stock_board_industry_name_em(),
